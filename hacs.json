@@ -1,0 +1,8 @@
+{
+  "name": "Periodic Lights",
+  "content_in_root": false,
+  "country": "US",
+  "homeassistant": "2024.1.0",
+  "iot_class": "calculated",
+  "render_readme": true
+}

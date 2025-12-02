@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Periodic Lights",
+        "description": "Create a light setup controlled by Periodic Lights.",
+        "data": {
+          "name": "Setup name",
+          "lights": "Lights to control"
+        }
+      }
+    },
+    "error": {
+      "no_lights": "You must select at least one light."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Periodic Lights options",
+        "description": "Update the lights in this setup.",
+        "data": {
+          "lights": "Lights to control"
+        }
+      }
+    },
+    "error": {
+      "no_lights": "You must select at least one light."
+    }
+  }
+}
