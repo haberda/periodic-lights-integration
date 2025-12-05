@@ -21,6 +21,8 @@ from .const import (
     CONF_USE_HIDDEN,
     CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
+    DEFAULT_MIN_BRIGHTNESS,
+    DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
     DEFAULT_UPDATE_INTERVAL,
@@ -110,7 +112,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(CONF_MIN_BRIGHTNESS, default=0): selector.selector(
+                vol.Required(CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS): selector.selector(
                     {
                         "number": {
                             "min": 0,
@@ -121,7 +123,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(CONF_MAX_BRIGHTNESS, default=100): selector.selector(
+                vol.Required(CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS): selector.selector(
                     {
                         "number": {
                             "min": 0,

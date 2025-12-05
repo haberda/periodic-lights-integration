@@ -25,13 +25,15 @@ from .const import (
     ATTR_COLOR_TEMP_ENABLED,
     ATTR_SHAPING_PARAM,
     ATTR_SHAPING_FUNCTION,
+    DEFAULT_MIN_BRIGHTNESS,
+    DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
     DEFAULT_SHAPING_PARAM,
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_UPDATE_SENSORS,
 )
-from .solar_curve import daily_cosine_pct, map_pct_to_range, SolarCycle, apply_shaping
+from .solar_curve import daily_pct, map_pct_to_range, SolarCycle, apply_shaping
 from .light_control import async_update_lights_for_entry
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,8 +72,9 @@ class _BasePeriodicSensor(SensorEntity):
         self.hass = hass
         self._entry_id = entry_id
         self._setup_name = setup_name
-        self._pct_raw: float | None = None
-        self._pct_shaped: float | None = None
+        # For debugging / attributes
+        self._phase: float | None = None       # unshaped daily phase
+        self._pct_shaped: float | None = None  # shaped brightness fraction
         self._solar_cycle: SolarCycle | None = None
         self._unsub_timer = None
         self._unsub_dispatcher = None
@@ -128,7 +131,7 @@ class _BasePeriodicSensor(SensorEntity):
         This may be called from a worker thread; we MUST NOT call
         async_write_ha_state directly here.
         """
-        # Schedule the async helper on the event loop
+        # hass.add_job is thread-safe and will run the coroutine in the event loop.
         self.hass.add_job(self._async_handle_external_update())
 
     async def _async_handle_external_update(self) -> None:
@@ -167,16 +170,17 @@ class _BasePeriodicSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Additional info: raw and shaped pct, solar timings."""
+        """Additional info: phase, shaped pct, solar timings."""
         attrs: dict[str, Any] = {}
-        if self._pct_raw is not None:
-            attrs["raw_pct"] = round(self._pct_raw, 4)
+        if self._phase is not None:
+            attrs["phase"] = round(self._phase, 4)
         if self._pct_shaped is not None:
             attrs["shaped_pct"] = round(self._pct_shaped, 4)
         if self._solar_cycle is not None:
             attrs["sunrise"] = self._solar_cycle.sunrise.isoformat()
             attrs["sunset"] = self._solar_cycle.sunset.isoformat()
             attrs["midday"] = self._solar_cycle.midday.isoformat()
+            attrs["night_midpoint"] = self._solar_cycle.night_midpoint.isoformat()
         return attrs
 
 
@@ -208,21 +212,21 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
         return True
 
     def _recalculate(self) -> None:
-        # Baseline curve
-        pct_raw, cycle = daily_cosine_pct(self.hass)
-        self._pct_raw = pct_raw
+        # Baseline daily phase (0 = night, 0.5 = midday, 1 = next night)
+        phase, cycle = daily_pct(self.hass)
+        self._phase = phase
         self._solar_cycle = cycle
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         shaping_param = float(data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
         shaping_func = data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
-        pct_shaped = apply_shaping(pct_raw, shaping_func, shaping_param)
-        self._pct_shaped = pct_shaped
+        pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
+        self._pct_shaped = pct_shaped  # fraction in [0,1]
 
         # Get current slider-configured min/max brightness
-        min_brightness = float(data.get(CONF_MIN_BRIGHTNESS, 0))
-        max_brightness = float(data.get(CONF_MAX_BRIGHTNESS, 100))
+        min_brightness = float(data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS))
+        max_brightness = float(data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS))
 
         brightness = map_pct_to_range(
             pct_shaped,
@@ -242,8 +246,8 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs = super().extra_state_attributes
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        attrs["min_brightness"] = data.get(CONF_MIN_BRIGHTNESS, 0)
-        attrs["max_brightness"] = data.get(CONF_MAX_BRIGHTNESS, 100)
+        attrs["min_brightness"] = data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
+        attrs["max_brightness"] = data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
         return attrs
 
 
@@ -271,15 +275,16 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         return master and ct_enabled
 
     def _recalculate(self) -> None:
-        pct_raw, cycle = daily_cosine_pct(self.hass)
-        self._pct_raw = pct_raw
+        # Baseline daily phase
+        phase, cycle = daily_pct(self.hass)
+        self._phase = phase
         self._solar_cycle = cycle
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         shaping_param = float(data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
         shaping_func = data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
-        pct_shaped = apply_shaping(pct_raw, shaping_func, shaping_param)
+        pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
         self._pct_shaped = pct_shaped
 
         min_kelvin = float(data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN))

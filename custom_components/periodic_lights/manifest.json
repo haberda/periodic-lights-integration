@@ -1,7 +1,7 @@
 {
   "domain": "periodic_lights",
   "name": "Periodic Lights",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "documentation": "https://example.com/periodic_lights",
   "requirements": [],
   "codeowners": ["@your_github"],

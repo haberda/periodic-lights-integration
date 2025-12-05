@@ -23,6 +23,8 @@ from .const import (
     ATTR_LAST_LIGHT_UPDATE,
     ATTR_SHAPING_PARAM,
     ATTR_SHAPING_FUNCTION,
+    DEFAULT_MIN_BRIGHTNESS,
+    DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
     DEFAULT_UPDATE_INTERVAL,
@@ -31,7 +33,7 @@ from .const import (
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_UPDATE_SENSORS,
 )
-from .solar_curve import daily_cosine_pct, map_pct_to_range, apply_shaping
+from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
 
 
 async def async_update_lights_for_entry(
@@ -40,10 +42,13 @@ async def async_update_lights_for_entry(
     *,
     force: bool = False,
 ) -> None:
-    """Apply current settings to all configured lights for this entry."""
+    """Apply current settings to all configured lights for this entry.
+
+    If force=True, sensors are also told to recalculate immediately via dispatcher,
+    and interval-based throttling is skipped.
+    """
     domain_data = hass.data.get(DOMAIN)
     if not domain_data:
-        # Still notify sensors when force=True so they reflect latest settings
         if force:
             async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
         return
@@ -59,7 +64,7 @@ async def async_update_lights_for_entry(
     if force:
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
 
-    # Master enable: if off, *no* updates to any light
+    # Master enable: if off, *no* updates to any light.
     if not entry_data.get(ATTR_ENABLED, True):
         return
 
@@ -83,8 +88,8 @@ async def async_update_lights_for_entry(
         ATTR_LIGHT_SETTINGS, {}
     )
 
-    global_min_brightness = float(entry_data.get(CONF_MIN_BRIGHTNESS, 0))
-    global_max_brightness = float(entry_data.get(CONF_MAX_BRIGHTNESS, 100))
+    global_min_brightness = float(entry_data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS))
+    global_max_brightness = float(entry_data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS))
     global_min_kelvin = float(entry_data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN))
     global_max_kelvin = float(entry_data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
     transition = float(entry_data.get(CONF_TRANSITION, DEFAULT_TRANSITION))
@@ -92,9 +97,9 @@ async def async_update_lights_for_entry(
     shaping_param = float(entry_data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
     shaping_func = entry_data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
-    # Baseline curve (shared for all lights), then apply shaping
-    pct_raw, _cycle = daily_cosine_pct(hass)
-    pct_shaped = apply_shaping(pct_raw, shaping_func, shaping_param)
+    # Baseline daily phase (0=night, 0.5=midday, 1=next night), then apply shaping
+    phase, _cycle = daily_pct(hass)
+    pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
 
     for light_id in lights:
         state = hass.states.get(light_id)
@@ -126,8 +131,8 @@ async def async_update_lights_for_entry(
                     max_brightness,
                 )
                 brightness_pct = max(0, min(100, brightness_pct))
-
-            service_data["brightness_pct"] = brightness_pct
+            # HA expects 0–100 for brightness_pct
+            service_data["brightness_pct"] = int(round(brightness_pct))
 
         # ---- Color temperature handling ----
         if color_temp_enabled:

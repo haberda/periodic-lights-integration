@@ -29,10 +29,12 @@ ATTR_TRANSITION_ON_TURN_ON = "transition_on_turn_on"
 ATTR_SHAPING_PARAM = "shaping_param"          # float
 ATTR_SHAPING_FUNCTION = "shaping_function"    # str, e.g. "gamma_sine"
 
+DEFAULT_MIN_BRIGHTNESS = 1
+DEFAULT_MAX_BRIGHTNESS = 100
 DEFAULT_MIN_KELVIN = 2500
 DEFAULT_MAX_KELVIN = 5000
-DEFAULT_UPDATE_INTERVAL = 60       # seconds
-DEFAULT_TRANSITION = 0             # seconds
+DEFAULT_UPDATE_INTERVAL = 300       # seconds
+DEFAULT_TRANSITION = 5             # seconds
 DEFAULT_SHAPING_PARAM = 1.0        # Gamma=1 => baseline half-sine
 DEFAULT_SHAPING_FUNCTION = "gamma_sine"
 
