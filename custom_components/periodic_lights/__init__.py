@@ -24,6 +24,8 @@ from .const import (
     ATTR_LIGHT_SETTINGS,
     ATTR_LAST_LIGHT_UPDATE,
     ATTR_TRANSITION_ON_TURN_ON,
+    ATTR_USE_FIXED_MIN_TIME,
+    ATTR_FIXED_MIN_TIME,
     ATTR_SHAPING_PARAM,
     ATTR_SHAPING_FUNCTION,
     DEFAULT_MIN_KELVIN,
@@ -67,6 +69,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ATTR_LIGHT_SETTINGS: {},
         ATTR_LAST_LIGHT_UPDATE: None,
         ATTR_TRANSITION_ON_TURN_ON: True,
+        ATTR_USE_FIXED_MIN_TIME: False,
+        ATTR_FIXED_MIN_TIME: 0.0, 
         # Shaping defaults
         ATTR_SHAPING_PARAM: DEFAULT_SHAPING_PARAM,
         ATTR_SHAPING_FUNCTION: DEFAULT_SHAPING_FUNCTION,

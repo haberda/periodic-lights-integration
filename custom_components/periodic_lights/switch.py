@@ -19,6 +19,7 @@ from .const import (
     ATTR_COLOR_TEMP_ENABLED,
     ATTR_BEDTIME,
     ATTR_TRANSITION_ON_TURN_ON,
+    ATTR_USE_FIXED_MIN_TIME,
 )
 from .light_control import async_update_lights_for_entry
 
@@ -40,7 +41,9 @@ async def async_setup_entry(
         PeriodicLightsColorTempSwitch(hass, entry.entry_id, name),
         PeriodicLightsBedtimeSwitch(hass, entry.entry_id, name),
         PeriodicLightsTransitionOnTurnOnSwitch(hass, entry.entry_id, name),
+        PeriodicLightsFixedMinSwitch(hass, entry.entry_id, name),  # <-- add this
     ]
+
     async_add_entities(entities)
 
 
@@ -296,3 +299,47 @@ class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
             data[ATTR_TRANSITION_ON_TURN_ON] = False
         self.async_write_ha_state()
         # No immediate change; we just stop reacting to future light-on events.
+
+class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
+    """Switch to enable using the fixed minimum-time override."""
+
+    def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
+        super().__init__(hass, entry_id, setup_name)
+        self._attr_name = f"{setup_name} Use Fixed Minimum Time"
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_use_fixed_min_time"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        old_state = await self.async_get_last_state()
+        if old_state is not None:
+            self._is_on = old_state.state == "on"
+        else:
+            self._is_on = False  # default: off
+
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if data is not None:
+            data[ATTR_USE_FIXED_MIN_TIME] = self._is_on
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._is_on = True
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if data is not None:
+            data[ATTR_USE_FIXED_MIN_TIME] = True
+        self.async_write_ha_state()
+
+        # Changing this should immediately update sensors/lights
+        self.hass.async_create_task(
+            async_update_lights_for_entry(self.hass, self._entry_id, force=True)
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._is_on = False
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if data is not None:
+            data[ATTR_USE_FIXED_MIN_TIME] = False
+        self.async_write_ha_state()
+
+        # Also update immediately to revert to solar-based min
+        self.hass.async_create_task(
+            async_update_lights_for_entry(self.hass, self._entry_id, force=True)
+        )

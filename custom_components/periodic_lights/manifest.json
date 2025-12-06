@@ -1,10 +1,10 @@
 {
   "domain": "periodic_lights",
   "name": "Periodic Lights",
-  "version": "0.0.2",
-  "documentation": "https://example.com/periodic_lights",
+  "version": "0.0.3",
+  "documentation": "https://github.com/haberda/periodic-lights-integration",
   "requirements": [],
-  "codeowners": ["@your_github"],
+  "codeowners": ["@haberda"],
   "config_flow": true,
-  "iot_class": "local_push"
+  "iot_class": "calculated"
 }

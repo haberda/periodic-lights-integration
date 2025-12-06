@@ -25,6 +25,10 @@ ATTR_LIGHT_SETTINGS = "light_settings"
 ATTR_LAST_LIGHT_UPDATE = "last_light_update"
 ATTR_TRANSITION_ON_TURN_ON = "transition_on_turn_on"
 
+#  Fixed-minimum-time controls
+ATTR_USE_FIXED_MIN_TIME = "use_fixed_min_time"   # bool
+ATTR_FIXED_MIN_TIME = "fixed_min_time"           # seconds since midnight (float)
+
 # Shaping controls (global per setup, not in config flow)
 ATTR_SHAPING_PARAM = "shaping_param"          # float
 ATTR_SHAPING_FUNCTION = "shaping_function"    # str, e.g. "gamma_sine"
@@ -37,7 +41,8 @@ DEFAULT_UPDATE_INTERVAL = 300       # seconds
 DEFAULT_TRANSITION = 5             # seconds
 DEFAULT_SHAPING_PARAM = 1.0        # Gamma=1 => baseline half-sine
 DEFAULT_SHAPING_FUNCTION = "gamma_sine"
+DEFAULT_FIXED_MIN_TIME = "00:00"
 
-PLATFORMS = ["switch", "sensor", "number", "select"]
+PLATFORMS = ["switch", "sensor", "number", "select", "time"]
 
 MANUFACTURER = "Periodic Lights"

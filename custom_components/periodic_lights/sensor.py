@@ -11,6 +11,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -25,6 +26,8 @@ from .const import (
     ATTR_COLOR_TEMP_ENABLED,
     ATTR_SHAPING_PARAM,
     ATTR_SHAPING_FUNCTION,
+    ATTR_USE_FIXED_MIN_TIME,
+    ATTR_FIXED_MIN_TIME,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
@@ -60,6 +63,70 @@ async def async_setup_entry(
         ),
     ]
     async_add_entities(entities)
+
+
+def _parse_fixed_min_seconds(raw: Any) -> float:
+    """Parse ATTR_FIXED_MIN_TIME from hass.data into seconds since midnight.
+
+    Accepts:
+      - float/int  -> interpreted as seconds since midnight
+      - "HH:MM"    -> parsed as hours & minutes
+      - "HH:MM:SS" -> parsed as hours, minutes, seconds
+    """
+    if raw is None:
+        return 0.0
+
+    # Already numeric (old behavior)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        pass
+
+    # String "HH:MM" or "HH:MM:SS"
+    if isinstance(raw, str):
+        parts = raw.split(":")
+        if len(parts) >= 2:
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1])
+                second = int(parts[2]) if len(parts) > 2 else 0
+                return float(hour * 3600 + minute * 60 + second)
+            except ValueError:
+                return 0.0
+
+    return 0.0
+
+
+def _compute_phase_with_optional_override(
+    hass: HomeAssistant,
+    entry_data: dict[str, Any],
+) -> tuple[float, SolarCycle]:
+    """Return phase in [0,1], using fixed-min override if enabled.
+
+    - When override is off: uses solar-based daily_pct.
+    - When override is on: phase is 0.0 at the configured minimum time,
+      0.5 twelve hours later, 1.0 after 24h.
+    """
+    # Always get solar cycle (for attributes) via daily_pct
+    phase, cycle = daily_pct(hass)
+
+    use_fixed = bool(entry_data.get(ATTR_USE_FIXED_MIN_TIME, False))
+    if not use_fixed:
+        return phase, cycle
+
+    fixed_raw = entry_data.get(ATTR_FIXED_MIN_TIME, 0.0)
+    fixed_seconds = _parse_fixed_min_seconds(fixed_raw)
+
+    now_local = dt_util.as_local(dt_util.utcnow())
+    today = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    min_dt = today + timedelta(seconds=fixed_seconds)
+
+    seconds_from_min = (now_local - min_dt).total_seconds()
+    phase_override = (seconds_from_min / (24 * 3600.0)) % 1.0
+    if phase_override < 0.0:
+        phase_override += 1.0
+
+    return phase_override, cycle
 
 
 class _BasePeriodicSensor(SensorEntity):
@@ -131,7 +198,6 @@ class _BasePeriodicSensor(SensorEntity):
         This may be called from a worker thread; we MUST NOT call
         async_write_ha_state directly here.
         """
-        # hass.add_job is thread-safe and will run the coroutine in the event loop.
         self.hass.add_job(self._async_handle_external_update())
 
     async def _async_handle_external_update(self) -> None:
@@ -212,21 +278,26 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
         return True
 
     def _recalculate(self) -> None:
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+
         # Baseline daily phase (0 = night, 0.5 = midday, 1 = next night)
-        phase, cycle = daily_pct(self.hass)
+        phase, cycle = _compute_phase_with_optional_override(self.hass, entry_data)
         self._phase = phase
         self._solar_cycle = cycle
 
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        shaping_param = float(data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
-        shaping_func = data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
+        shaping_param = float(entry_data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
+        shaping_func = entry_data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
         pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
         self._pct_shaped = pct_shaped  # fraction in [0,1]
 
         # Get current slider-configured min/max brightness
-        min_brightness = float(data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS))
-        max_brightness = float(data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS))
+        min_brightness = float(
+            entry_data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
+        )
+        max_brightness = float(
+            entry_data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+        )
 
         brightness = map_pct_to_range(
             pct_shaped,
@@ -246,8 +317,12 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs = super().extra_state_attributes
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        attrs["min_brightness"] = data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-        attrs["max_brightness"] = data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+        attrs["min_brightness"] = data.get(
+            CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS
+        )
+        attrs["max_brightness"] = data.get(
+            CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS
+        )
         return attrs
 
 
@@ -275,20 +350,21 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         return master and ct_enabled
 
     def _recalculate(self) -> None:
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+
         # Baseline daily phase
-        phase, cycle = daily_pct(self.hass)
+        phase, cycle = _compute_phase_with_optional_override(self.hass, entry_data)
         self._phase = phase
         self._solar_cycle = cycle
 
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        shaping_param = float(data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
-        shaping_func = data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
+        shaping_param = float(entry_data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
+        shaping_func = entry_data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
         pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
         self._pct_shaped = pct_shaped
 
-        min_kelvin = float(data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN))
-        max_kelvin = float(data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
+        min_kelvin = float(entry_data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN))
+        max_kelvin = float(entry_data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
 
         kelvin = map_pct_to_range(
             pct_shaped,

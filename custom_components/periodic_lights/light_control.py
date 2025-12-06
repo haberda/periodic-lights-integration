@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -23,6 +24,8 @@ from .const import (
     ATTR_LAST_LIGHT_UPDATE,
     ATTR_SHAPING_PARAM,
     ATTR_SHAPING_FUNCTION,
+    ATTR_USE_FIXED_MIN_TIME,
+    ATTR_FIXED_MIN_TIME,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
@@ -34,6 +37,62 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
 )
 from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
+
+
+def _parse_fixed_min_seconds(raw: Any) -> float:
+    """Parse ATTR_FIXED_MIN_TIME into seconds since midnight.
+
+    Accepts:
+      - float/int  -> seconds since midnight
+      - "HH:MM"    -> parsed as hours & minutes
+      - "HH:MM:SS" -> parsed as hours, minutes, seconds
+    """
+    if raw is None:
+        return 0.0
+
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(raw, str):
+        parts = raw.split(":")
+        if len(parts) >= 2:
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1])
+                second = int(parts[2]) if len(parts) > 2 else 0
+                return float(hour * 3600 + minute * 60 + second)
+            except ValueError:
+                return 0.0
+
+    return 0.0
+
+
+def _compute_phase_with_optional_override(
+    hass: HomeAssistant,
+    entry_data: dict[str, Any],
+) -> float:
+    """Return phase in [0,1], using fixed-min override if enabled."""
+    phase, _cycle = daily_pct(hass)
+
+    use_fixed = bool(entry_data.get(ATTR_USE_FIXED_MIN_TIME, False))
+    if not use_fixed:
+        return phase
+
+    fixed_raw = entry_data.get(ATTR_FIXED_MIN_TIME, 0.0)
+    fixed_seconds = _parse_fixed_min_seconds(fixed_raw)
+
+    now_local = dt_util.as_local(dt_util.utcnow())
+    today = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    min_dt = today + timedelta(seconds=fixed_seconds)
+
+    seconds_from_min = (now_local - min_dt).total_seconds()
+    phase_override = (seconds_from_min / (24 * 3600.0)) % 1.0
+    if phase_override < 0.0:
+        phase_override += 1.0
+
+    return phase_override
 
 
 async def async_update_lights_for_entry(
@@ -88,8 +147,12 @@ async def async_update_lights_for_entry(
         ATTR_LIGHT_SETTINGS, {}
     )
 
-    global_min_brightness = float(entry_data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS))
-    global_max_brightness = float(entry_data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS))
+    global_min_brightness = float(
+        entry_data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
+    )
+    global_max_brightness = float(
+        entry_data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+    )
     global_min_kelvin = float(entry_data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN))
     global_max_kelvin = float(entry_data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
     transition = float(entry_data.get(CONF_TRANSITION, DEFAULT_TRANSITION))
@@ -98,7 +161,7 @@ async def async_update_lights_for_entry(
     shaping_func = entry_data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
     # Baseline daily phase (0=night, 0.5=midday, 1=next night), then apply shaping
-    phase, _cycle = daily_pct(hass)
+    phase = _compute_phase_with_optional_override(hass, entry_data)
     pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
 
     for light_id in lights:
@@ -131,7 +194,6 @@ async def async_update_lights_for_entry(
                     max_brightness,
                 )
                 brightness_pct = max(0, min(100, brightness_pct))
-            # HA expects 0–100 for brightness_pct
             service_data["brightness_pct"] = int(round(brightness_pct))
 
         # ---- Color temperature handling ----
