@@ -208,8 +208,7 @@ async def async_update_lights_for_entry(
                 )
 
             if kelvin > 0:
-                mired = int(round(1_000_000 / kelvin))
-                service_data["color_temp"] = mired
+                service_data["color_temp_kelvin"] = kelvin
 
         # ---- Transition ----
         if transition > 0:
