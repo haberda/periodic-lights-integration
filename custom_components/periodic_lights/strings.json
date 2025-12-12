@@ -7,11 +7,11 @@
         "data": {
           "name": "Setup name",
           "lights": "Lights to control"
+        },
+        "errors": {
+          "no_lights": "You must select at least one light or choose an area that contains lights."
         }
       }
-    },
-    "error": {
-      "no_lights": "You must select at least one light."
     }
   },
   "options": {
@@ -21,11 +21,11 @@
         "description": "Update the lights in this setup.",
         "data": {
           "lights": "Lights to control"
+        },
+        "errors": {
+          "no_lights": "You must select at least one light or choose an area that contains lights."
         }
       }
-    },
-    "error": {
-      "no_lights": "You must select at least one light."
     }
   }
 }

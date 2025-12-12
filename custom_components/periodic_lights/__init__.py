@@ -36,6 +36,7 @@ from .const import (
     DEFAULT_SHAPING_FUNCTION,
 )
 from .light_control import async_update_lights_for_entry
+from . import config_flow
 
 ATTR_LIGHT_ON_LISTENER = "light_on_listener"
 
@@ -132,3 +133,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN]:
             hass.data.pop(DOMAIN, None)
     return unload_ok
+
+async def async_get_options_flow(config_entry):
+    """Return the options flow handler."""
+    return config_flow.PeriodicLightsOptionsFlowHandler(config_entry)

@@ -5,6 +5,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -28,6 +29,38 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_TRANSITION,
 )
+
+
+async def async_get_lights_in_area(
+    hass,
+    area_id: str,
+    include_hidden: bool = False,
+) -> list[str]:
+    """Return all light entity_ids associated with the given area."""
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
+    lights: list[str] = []
+
+    for entity in ent_reg.entities.values():
+        if entity.domain != "light":
+            continue
+
+        if not include_hidden and entity.hidden_by is not None:
+            continue
+
+        # Entity directly assigned to area
+        if entity.area_id == area_id:
+            lights.append(entity.entity_id)
+            continue
+
+        # Or device assigned to area
+        if entity.device_id:
+            device = dev_reg.devices.get(entity.device_id)
+            if device and device.area_id == area_id:
+                lights.append(entity.entity_id)
+
+    return sorted(set(lights))
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -54,7 +87,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Expand area into light entities with optional hidden filtering
             lights_from_area: list[str] = []
             if area_id:
-                lights_from_area = await self._async_get_lights_in_area(
+                lights_from_area = await async_get_lights_in_area(
+                    self.hass,
                     area_id,
                     include_hidden=use_hidden,
                 )
@@ -112,7 +146,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS): selector.selector(
+                vol.Required(
+                    CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS
+                ): selector.selector(
                     {
                         "number": {
                             "min": 0,
@@ -123,7 +159,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         }
                     }
                 ),
-                vol.Required(CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS): selector.selector(
+                vol.Required(
+                    CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS
+                ): selector.selector(
                     {
                         "number": {
                             "min": 0,
@@ -199,31 +237,82 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def _async_get_lights_in_area(
-        self,
-        area_id: str,
-        include_hidden: bool = False,
-    ) -> list[str]:
-        """Return all light entity_ids associated with the given area."""
-        dev_reg = dr.async_get(self.hass)
-        ent_reg = er.async_get(self.hass)
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return PeriodicLightsOptionsFlowHandler(config_entry)
 
-        lights: list[str] = []
 
-        for entity in ent_reg.entities.values():
-            if entity.domain != "light":
-                continue
+class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options flow for Periodic Lights."""
 
-            if not include_hidden and entity.hidden_by is not None:
-                continue
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._config_entry = config_entry
 
-            if entity.area_id == area_id:
-                lights.append(entity.entity_id)
-                continue
+    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
 
-            if entity.device_id:
-                device = dev_reg.devices.get(entity.device_id)
-                if device and device.area_id == area_id:
-                    lights.append(entity.entity_id)
+        data = dict(self._config_entry.data)
+        current_area_id: str | None = data.get(CONF_AREA_ID)
+        current_use_hidden: bool = bool(data.get(CONF_USE_HIDDEN, False))
+        current_lights: list[str] = data.get(CONF_LIGHTS, [])
 
-        return lights
+        if user_input is not None:
+            area_id: str | None = user_input.get(CONF_AREA_ID)
+            use_hidden: bool = bool(user_input.get(CONF_USE_HIDDEN, False))
+            selected_lights: list[str] = user_input.get(CONF_LIGHTS, [])
+
+            lights_from_area: list[str] = []
+            if area_id:
+                lights_from_area = await async_get_lights_in_area(
+                    self.hass,
+                    area_id,
+                    include_hidden=use_hidden,
+                )
+
+            combined_lights = sorted(set(selected_lights) | set(lights_from_area))
+
+            if not combined_lights:
+                errors["base"] = "no_lights"
+            else:
+                new_data = {
+                    **data,
+                    CONF_AREA_ID: area_id,
+                    CONF_USE_HIDDEN: use_hidden,
+                    CONF_LIGHTS: combined_lights,
+                }
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry,
+                    data=new_data,
+                )
+                await self.hass.config_entries.async_reload(self._config_entry.entry_id)
+                return self.async_create_entry(title="", data={})
+
+            current_area_id = area_id
+            current_use_hidden = use_hidden
+            current_lights = selected_lights
+
+        data_schema = vol.Schema(
+            {
+                vol.Optional(CONF_AREA_ID, default=current_area_id): selector.selector(
+                    {"area": {}}
+                ),
+                vol.Required(
+                    CONF_USE_HIDDEN, default=current_use_hidden
+                ): selector.selector({"boolean": {}}),
+                vol.Optional(CONF_LIGHTS, default=current_lights): selector.selector(
+                    {
+                        "entity": {
+                            "domain": "light",
+                            "multiple": True,
+                        }
+                    }
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=data_schema,
+            errors=errors,
+        )
