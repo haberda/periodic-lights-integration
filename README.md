@@ -25,11 +25,7 @@ All configuration is available through the Home Assistant UI. No YAML or file ed
 4. [Configuration](#configuration)  
 5. [Entities Created](#entities-created)  
 6. [Shaping Functions](#shaping-functions)  
-7. [Behavior Details](#behavior-details)  
-8. [Per-Light Overrides](#per-light-overrides)  
-9. [Triggers & Update Logic](#triggers--update-logic)  
-10. [Troubleshooting](#troubleshooting)  
-11. [Planned Extensions](#planned-extensions)
+7. [Planned Extensions](#planned-extensions)
 
 ---
 
