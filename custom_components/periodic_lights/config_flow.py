@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import logging
 
 import voluptuous as vol
 
@@ -30,10 +31,67 @@ from .const import (
     DEFAULT_TRANSITION,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
+
+def _is_onoff_only_light(hass, entity_id: str) -> bool:
+    """Return True if we can confidently determine the light is on/off only.
+
+    Uses runtime state attributes (supported_color_modes). If we can't determine,
+    returns False (do not exclude).
+    """
+    state = hass.states.get(entity_id)
+    if state is None:
+        # Can't determine (not loaded yet / unavailable in flow). Don't exclude.
+        return False
+
+    modes = state.attributes.get("supported_color_modes")
+    if not modes:
+        # Some lights may not expose this in state yet; don't exclude.
+        return False
+
+    # If it supports ONLY onoff, exclude it.
+    modes_set = {str(m).lower() for m in modes}
+    return modes_set == {"onoff"}
+
+
+def _filter_configurable_lights(
+    hass,
+    entity_ids: list[str],
+    *,
+    warn_on_dropped: bool = False,
+    context: str = "",
+) -> list[str]:
+    """Filter out on/off-only lights.
+
+    - Silent drop always.
+    - Optionally warn for dropped lights (manual selection path).
+    """
+    kept: list[str] = []
+    dropped: list[str] = []
+
+    for eid in entity_ids:
+        if _is_onoff_only_light(hass, eid):
+            dropped.append(eid)
+        else:
+            kept.append(eid)
+
+    if warn_on_dropped and dropped:
+        _LOGGER.warning(
+            "Periodic Lights: dropped %d on/off-only light(s) from %s selection: %s",
+            len(dropped),
+            context or "manual",
+            ", ".join(dropped),
+        )
+
+    # de-dupe but preserve stable ordering
+    return sorted(set(kept))
+
 
 async def async_get_lights_in_area(
     hass,
     area_id: str,
+    *,
     include_hidden: bool = False,
 ) -> list[str]:
     """Return all light entity_ids associated with the given area."""
@@ -74,7 +132,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             name = user_input[CONF_NAME]
-            selected_lights: list[str] = user_input.get(CONF_LIGHTS, [])
+
+            selected_lights_raw: list[str] = user_input.get(CONF_LIGHTS, [])
             min_brightness = int(user_input[CONF_MIN_BRIGHTNESS])
             max_brightness = int(user_input[CONF_MAX_BRIGHTNESS])
             min_kelvin = int(user_input[CONF_MIN_KELVIN])
@@ -85,18 +144,32 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             transition = int(user_input[CONF_TRANSITION])
 
             # Expand area into light entities with optional hidden filtering
-            lights_from_area: list[str] = []
+            lights_from_area_raw: list[str] = []
             if area_id:
-                lights_from_area = await async_get_lights_in_area(
+                lights_from_area_raw = await async_get_lights_in_area(
                     self.hass,
                     area_id,
                     include_hidden=use_hidden,
                 )
 
+            # Filter out on/off-only lights
+            selected_lights = _filter_configurable_lights(
+                self.hass,
+                selected_lights_raw,
+                warn_on_dropped=True,
+                context="manual",
+            )
+            lights_from_area = _filter_configurable_lights(
+                self.hass,
+                lights_from_area_raw,
+                warn_on_dropped=False,
+                context="area",
+            )
+
             # Merge area lights + manual lights and dedupe
             combined_lights = sorted(set(selected_lights) | set(lights_from_area))
 
-            # Validation
+            # Validation (note: "no_lights" should have a strings.json entry)
             if not combined_lights:
                 errors["base"] = "no_lights"
             elif min_brightness < 0 or max_brightness > 100:
@@ -139,12 +212,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     {"boolean": {}}
                 ),
                 vol.Optional(CONF_LIGHTS, default=[]): selector.selector(
-                    {
-                        "entity": {
-                            "domain": "light",
-                            "multiple": True,
-                        }
-                    }
+                    {"entity": {"domain": "light", "multiple": True}}
                 ),
                 vol.Required(
                     CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS
@@ -173,8 +241,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
                 vol.Required(
-                    CONF_MIN_KELVIN,
-                    default=DEFAULT_MIN_KELVIN,
+                    CONF_MIN_KELVIN, default=DEFAULT_MIN_KELVIN
                 ): selector.selector(
                     {
                         "number": {
@@ -187,8 +254,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
                 vol.Required(
-                    CONF_MAX_KELVIN,
-                    default=DEFAULT_MAX_KELVIN,
+                    CONF_MAX_KELVIN, default=DEFAULT_MAX_KELVIN
                 ): selector.selector(
                     {
                         "number": {
@@ -201,8 +267,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
                 vol.Required(
-                    CONF_UPDATE_INTERVAL,
-                    default=DEFAULT_UPDATE_INTERVAL,
+                    CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL
                 ): selector.selector(
                     {
                         "number": {
@@ -215,8 +280,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
                 vol.Required(
-                    CONF_TRANSITION,
-                    default=DEFAULT_TRANSITION,
+                    CONF_TRANSITION, default=DEFAULT_TRANSITION
                 ): selector.selector(
                     {
                         "number": {
@@ -244,9 +308,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow for Periodic Lights."""
+    """Handle options flow for Periodic Lights (area/lights only)."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        # NOTE: In some HA versions, OptionsFlow has a read-only config_entry property
+        # and does not accept args in super().__init__(). Store our own reference.
         self._config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
@@ -260,15 +326,29 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             area_id: str | None = user_input.get(CONF_AREA_ID)
             use_hidden: bool = bool(user_input.get(CONF_USE_HIDDEN, False))
-            selected_lights: list[str] = user_input.get(CONF_LIGHTS, [])
+            selected_lights_raw: list[str] = user_input.get(CONF_LIGHTS, [])
 
-            lights_from_area: list[str] = []
+            lights_from_area_raw: list[str] = []
             if area_id:
-                lights_from_area = await async_get_lights_in_area(
+                lights_from_area_raw = await async_get_lights_in_area(
                     self.hass,
                     area_id,
                     include_hidden=use_hidden,
                 )
+
+            # Filter out on/off-only lights
+            selected_lights = _filter_configurable_lights(
+                self.hass,
+                selected_lights_raw,
+                warn_on_dropped=True,
+                context="options-manual",
+            )
+            lights_from_area = _filter_configurable_lights(
+                self.hass,
+                lights_from_area_raw,
+                warn_on_dropped=False,
+                context="options-area",
+            )
 
             combined_lights = sorted(set(selected_lights) | set(lights_from_area))
 
@@ -281,16 +361,13 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_USE_HIDDEN: use_hidden,
                     CONF_LIGHTS: combined_lights,
                 }
-                self.hass.config_entries.async_update_entry(
-                    self._config_entry,
-                    data=new_data,
-                )
+                self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
                 await self.hass.config_entries.async_reload(self._config_entry.entry_id)
                 return self.async_create_entry(title="", data={})
 
             current_area_id = area_id
             current_use_hidden = use_hidden
-            current_lights = selected_lights
+            current_lights = selected_lights_raw
 
         data_schema = vol.Schema(
             {
@@ -301,12 +378,7 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_USE_HIDDEN, default=current_use_hidden
                 ): selector.selector({"boolean": {}}),
                 vol.Optional(CONF_LIGHTS, default=current_lights): selector.selector(
-                    {
-                        "entity": {
-                            "domain": "light",
-                            "multiple": True,
-                        }
-                    }
+                    {"entity": {"domain": "light", "multiple": True}}
                 ),
             }
         )
