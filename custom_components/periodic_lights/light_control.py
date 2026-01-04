@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.components import logbook
 from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -37,6 +39,8 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
 )
 from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _parse_fixed_min_seconds(raw: Any) -> float:
@@ -95,6 +99,73 @@ def _compute_phase_with_optional_override(
     return phase_override
 
 
+def _reason(entry_data: dict[str, Any], *, force: bool) -> str:
+    if entry_data.get(ATTR_BEDTIME, False):
+        return "bedtime"
+    if force:
+        return "forced_update"
+    return "periodic_update"
+
+
+def _log_action(
+    hass: HomeAssistant,
+    *,
+    entry_id: str,
+    light_id: str,
+    action: str,
+    reason: str,
+    phase: float,
+    shaped: float,
+    fixed_min: bool,
+    service_data: dict[str, Any],
+) -> None:
+    """Log both to Logbook (human) and logger (debug)."""
+    # Human-friendly trace in Logbook
+    # logbook.async_log_entry(
+    #     hass,
+    #     name="Periodic Lights",
+    #     message=(
+    #         f"[{entry_id}] {reason}: {action} {light_id} "
+    #         f"(bri_pct={service_data.get('brightness_pct')}, "
+    #         f"kelvin={service_data.get('color_temp_kelvin')}, "
+    #         f"transition={service_data.get('transition')}, "
+    #         f"phase={phase:.4f}, shaped={shaped:.4f}, "
+    #         f"fixed_min={fixed_min})"
+    #     ),
+    #     domain=DOMAIN,
+    #     entity_id=light_id,
+    # )
+    action_label = "Updated by Periodic Lights"
+
+    logbook.async_log_entry(
+        hass,
+        name="Periodic Lights",
+        message=(
+            f"{action_label} {reason}: {action} {light_id} "
+            f"Brightness={service_data.get('brightness_pct')}, "
+            f"Kelvin={service_data.get('color_temp_kelvin')}, "
+            # f"transition={service_data.get('transition')}, "
+            # f"phase={phase:.4f}, shaped={shaped:.4f}, "
+            # f"fixed_min={fixed_min})"
+        ),
+        domain=DOMAIN,
+        entity_id=light_id,
+    )
+
+    # Structured trace in HA logs
+    _LOGGER.debug(
+        "Periodic Lights ACTION | entry_id=%s light=%s action=%s reason=%s data=%s phase=%.4f shaped=%.4f fixed_min=%s",
+        entry_id,
+        light_id,
+        action,
+        reason,
+        {k: v for k, v in service_data.items() if k != "entity_id"},
+        phase,
+        shaped,
+        fixed_min,
+    )
+
+
 async def async_update_lights_for_entry(
     hass: HomeAssistant,
     entry_id: str,
@@ -143,16 +214,10 @@ async def async_update_lights_for_entry(
     brightness_enabled = entry_data.get(ATTR_BRIGHTNESS_ENABLED, True)
     color_temp_enabled = entry_data.get(ATTR_COLOR_TEMP_ENABLED, True)
     bedtime = entry_data.get(ATTR_BEDTIME, False)
-    per_light_settings: dict[str, dict[str, Any]] = entry_data.get(
-        ATTR_LIGHT_SETTINGS, {}
-    )
+    per_light_settings: dict[str, dict[str, Any]] = entry_data.get(ATTR_LIGHT_SETTINGS, {})
 
-    global_min_brightness = float(
-        entry_data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-    )
-    global_max_brightness = float(
-        entry_data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
-    )
+    global_min_brightness = float(entry_data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS))
+    global_max_brightness = float(entry_data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS))
     global_min_kelvin = float(entry_data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN))
     global_max_kelvin = float(entry_data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
     transition = float(entry_data.get(CONF_TRANSITION, DEFAULT_TRANSITION))
@@ -164,64 +229,98 @@ async def async_update_lights_for_entry(
     phase = _compute_phase_with_optional_override(hass, entry_data)
     pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
 
+    reason = _reason(entry_data, force=force)
+    fixed_min = bool(entry_data.get(ATTR_USE_FIXED_MIN_TIME, False))
+
     for light_id in lights:
         state = hass.states.get(light_id)
-        # Never turn on lights that are off / unavailable
+
+        # Only act on lights that are currently on
         if state is None or state.state != "on":
             continue
 
         this_light = per_light_settings.get(light_id, {})
 
-        min_brightness = float(
-            this_light.get(CONF_MIN_BRIGHTNESS, global_min_brightness)
-        )
-        max_brightness = float(
-            this_light.get(CONF_MAX_BRIGHTNESS, global_max_brightness)
-        )
+        min_brightness = float(this_light.get(CONF_MIN_BRIGHTNESS, global_min_brightness))
+        max_brightness = float(this_light.get(CONF_MAX_BRIGHTNESS, global_max_brightness))
         min_kelvin = float(this_light.get(CONF_MIN_KELVIN, global_min_kelvin))
         max_kelvin = float(this_light.get(CONF_MAX_KELVIN, global_max_kelvin))
 
-        service_data: dict[str, Any] = {"entity_id": light_id}
+        # We'll decide whether we are issuing turn_on or turn_off based on desired brightness.
+        service_on: dict[str, Any] = {"entity_id": light_id}
+        desired_bri: int | None = None
 
         # ---- Brightness handling ----
         if brightness_enabled:
             if bedtime:
                 brightness_pct = max(0, min(100, int(round(min_brightness))))
             else:
-                brightness_pct = map_pct_to_range(
-                    pct_shaped,
-                    min_brightness,
-                    max_brightness,
-                )
+                brightness_pct = map_pct_to_range(pct_shaped, min_brightness, max_brightness)
                 brightness_pct = max(0, min(100, brightness_pct))
-            service_data["brightness_pct"] = int(round(brightness_pct))
+
+            desired_bri = int(round(brightness_pct))
+            service_on["brightness_pct"] = desired_bri
 
         # ---- Color temperature handling ----
         if color_temp_enabled:
             if bedtime:
                 kelvin = min_kelvin
             else:
-                kelvin = map_pct_to_range(
-                    pct_shaped,
-                    min_kelvin,
-                    max_kelvin,
-                )
+                kelvin = map_pct_to_range(pct_shaped, min_kelvin, max_kelvin)
 
             if kelvin > 0:
-                service_data["color_temp_kelvin"] = kelvin
+                service_on["color_temp_kelvin"] =int(round(kelvin))
 
         # ---- Transition ----
         if transition > 0:
-            service_data["transition"] = transition
+            service_on["transition"] = transition
 
         # If we aren't updating brightness/CT/transition, skip this light
-        if len(service_data) <= 1:
+        if len(service_on) <= 1:
             continue
+
+        if brightness_enabled and desired_bri is not None and desired_bri < 1:
+            service_off: dict[str, Any] = {"entity_id": light_id}
+            if transition > 0:
+                service_off["transition"] = transition
+
+            _log_action(
+                hass,
+                entry_id=entry_id,
+                light_id=light_id,
+                action="turn_off",
+                reason=reason,
+                phase=phase,
+                shaped=pct_shaped,
+                fixed_min=fixed_min,
+                service_data=service_off,
+            )
+
+            await hass.services.async_call(
+                "light",
+                "turn_off",
+                service_off,
+                blocking=False,
+            )
+            continue
+
+        # Otherwise, normal turn_on path
+        _log_action(
+            hass,
+            entry_id=entry_id,
+            light_id=light_id,
+            action="turn_on",
+            reason=reason,
+            phase=phase,
+            shaped=pct_shaped,
+            fixed_min=fixed_min,
+            service_data=service_on,
+        )
 
         await hass.services.async_call(
             "light",
             "turn_on",
-            service_data,
+            service_on,
             blocking=False,
         )
 

@@ -320,7 +320,7 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
                 errors["base"] = "no_lights"
             else:
                 _LOGGER.warning(
-                    "PL OPTIONS SUBMIT | area_id(raw)=%r normalized=%r use_hidden=%r "
+                    "Periodic Lights OPTIONS UPDATED | area_id(raw)=%r normalized=%r use_hidden=%r "
                     "manual_raw=%r manual_filtered=%r combined=%r",
                     user_input.get(CONF_AREA_ID),
                     area_id,

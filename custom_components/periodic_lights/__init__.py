@@ -102,8 +102,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Periodic Lights from a config entry."""
-    _LOGGER.warning(
-        "PL SETUP ENTRY | entry_id=%s\nDATA: %s\nOPTIONS: %s",
+    _LOGGER.debug(
+        "Periodic Lights SETUP ENTRY | entry_id=%s\nDATA: %s\nOPTIONS: %s",
         entry.entry_id,
         pformat(dict(entry.data)),
         pformat(dict(entry.options)),
@@ -249,8 +249,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if old_lights == new_lights:
             return
 
-        _LOGGER.warning(
-            "PL POSTSTART REFRESH | entry_id=%s lights: %d -> %d",
+        _LOGGER.debug(
+            "Periodic Lights POSTSTART REFRESH | entry_id=%s lights: %d -> %d",
             entry.entry_id,
             len(old_lights),
             len(new_lights),
@@ -274,7 +274,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_lights = await _recompute_effective_lights()
             _apply_effective_lights(new_lights)
         except Exception:  # noqa: BLE001
-            _LOGGER.exception("PL POSTSTART REFRESH failed | entry_id=%s", entry.entry_id)
+            _LOGGER.exception("Periodic Lights POSTSTART REFRESH failed | entry_id=%s", entry.entry_id)
 
     if hass.is_running:
         entry.async_on_unload(async_call_later(hass, 5, _do_poststart_refresh))
