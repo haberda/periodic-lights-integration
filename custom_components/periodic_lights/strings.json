@@ -6,10 +6,24 @@
         "description": "Create a light setup controlled by Periodic Lights.",
         "data": {
           "name": "Setup name",
-          "lights": "Lights to control"
+          "area_id": "Choose area (optional)",
+          "use_hidden": "Use hidden lights in configured area",
+          "lights": "Choose lights (optional)",
+          "min_brightness": "Minimum brightness (%)",
+          "max_brightness": "Maximum brightness (%)",
+          "min_kelvin": "Minimum color temperature (K)",
+          "max_kelvin": "Maximum color temperature (K)",
+          "update_interval": "Update interval (seconds)",
+          "transition": "Transition time (seconds)"
         },
         "errors": {
-          "no_lights": "You must select at least one light or choose an area that contains lights."
+          "no_lights": "You must select at least one light or choose an area that contains lights.",
+          "brightness_out_of_range": "Brightness must be between 0 and 100%.",
+          "min_brightness_greater_than_max": "Minimum brightness must be less than or equal to maximum brightness.",
+          "kelvin_out_of_range": "Color temperature must be between 1500K and 6500K.",
+          "min_kelvin_greater_than_max": "Minimum color temperature must be less than or equal to maximum color temperature.",
+          "interval_out_of_range": "Update interval must be between 10 and 3600 seconds.",
+          "transition_out_of_range": "Transition time must be between 0 and 600 seconds."
         }
       }
     }
@@ -20,7 +34,9 @@
         "title": "Periodic Lights options",
         "description": "Update the lights in this setup.",
         "data": {
-          "lights": "Lights to control"
+          "area_id": "Choose area (optional)",
+          "use_hidden": "Use hidden lights in configured area",
+          "lights": "Choose lights (optional)"
         },
         "errors": {
           "no_lights": "You must select at least one light or choose an area that contains lights."

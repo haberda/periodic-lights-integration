@@ -1,7 +1,7 @@
 {
   "domain": "periodic_lights",
   "name": "Periodic Lights",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "documentation": "https://github.com/haberda/periodic-lights-integration",
   "requirements": [],
   "codeowners": ["@haberda"],

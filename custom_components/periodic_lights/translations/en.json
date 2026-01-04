@@ -12,7 +12,9 @@
           "min_brightness": "Minimum brightness (%)",
           "max_brightness": "Maximum brightness (%)",
           "min_kelvin": "Minimum color temperature (K)",
-          "max_kelvin": "Maximum color temperature (K)"
+          "max_kelvin": "Maximum color temperature (K)",
+          "update_interval": "Update interval (seconds)",
+          "transition": "Transition time (seconds)"
         }
       }
     },
@@ -21,7 +23,25 @@
       "brightness_out_of_range": "Brightness must be between 0 and 100%.",
       "min_brightness_greater_than_max": "Minimum brightness cannot be greater than maximum.",
       "kelvin_out_of_range": "Color temperature must be between 1500 K and 6500 K.",
-      "min_kelvin_greater_than_max": "Minimum color temperature cannot be greater than maximum."
+      "min_kelvin_greater_than_max": "Minimum color temperature cannot be greater than maximum.",
+      "interval_out_of_range": "Update interval must be between 10 and 3600 seconds.",
+      "transition_out_of_range": "Transition time must be within the allowed range."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Periodic Lights options",
+        "description": "Update which lights this setup controls.",
+        "data": {
+          "area_id": "Choose area (optional)",
+          "use_hidden": "Use hidden lights in configured area",
+          "lights": "Choose lights (optional)"
+        }
+      }
+    },
+    "error": {
+      "no_lights": "No lights were found. Choose an area and/or lights."
     }
   }
 }

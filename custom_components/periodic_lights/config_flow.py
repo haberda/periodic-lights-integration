@@ -33,24 +33,23 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Internal options key: the user's explicit list (authoritative)
+OPT_MANUAL_LIGHTS = "manual_lights"
+
+# Sentinel used to persist "cleared" for area_id in entry.options
+AREA_CLEARED = "__cleared__"
+
 
 def _is_onoff_only_light(hass, entity_id: str) -> bool:
-    """Return True if we can confidently determine the light is on/off only.
-
-    Uses runtime state attributes (supported_color_modes). If we can't determine,
-    returns False (do not exclude).
-    """
+    """Return True if we can confidently determine the light is on/off only."""
     state = hass.states.get(entity_id)
     if state is None:
-        # Can't determine (not loaded yet / unavailable in flow). Don't exclude.
         return False
 
     modes = state.attributes.get("supported_color_modes")
     if not modes:
-        # Some lights may not expose this in state yet; don't exclude.
         return False
 
-    # If it supports ONLY onoff, exclude it.
     modes_set = {str(m).lower() for m in modes}
     return modes_set == {"onoff"}
 
@@ -64,8 +63,8 @@ def _filter_configurable_lights(
 ) -> list[str]:
     """Filter out on/off-only lights.
 
-    - Silent drop always.
-    - Optionally warn for dropped lights (manual selection path).
+    - Always silently drop.
+    - Optionally warn for dropped lights (manual selection).
     """
     kept: list[str] = []
     dropped: list[str] = []
@@ -84,7 +83,6 @@ def _filter_configurable_lights(
             ", ".join(dropped),
         )
 
-    # de-dupe but preserve stable ordering
     return sorted(set(kept))
 
 
@@ -107,12 +105,10 @@ async def async_get_lights_in_area(
         if not include_hidden and entity.hidden_by is not None:
             continue
 
-        # Entity directly assigned to area
         if entity.area_id == area_id:
             lights.append(entity.entity_id)
             continue
 
-        # Or device assigned to area
         if entity.device_id:
             device = dev_reg.devices.get(entity.device_id)
             if device and device.area_id == area_id:
@@ -121,13 +117,72 @@ async def async_get_lights_in_area(
     return sorted(set(lights))
 
 
+def _normalize_area_id(area_id: Any) -> str | None:
+    """Normalize area selector output to either a non-empty string or None."""
+    if area_id is None:
+        return None
+    if isinstance(area_id, str):
+        s = area_id.strip()
+        return s or None
+    return None
+
+
+def _area_id_to_storage(area_id: str | None) -> str:
+    """Store area_id in options using a value that won't get dropped.
+
+    We store a non-empty sentinel to represent "cleared".
+    """
+    return area_id if area_id else AREA_CLEARED
+
+
+def _area_id_from_storage(value: Any) -> str | None:
+    """Read area_id from options/data; treat sentinel as cleared."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s or s == AREA_CLEARED:
+            return None
+        return s
+    return None
+
+
+async def _compute_combined_lights(
+    hass,
+    *,
+    manual_lights_raw: list[str],
+    area_id: str | None,
+    use_hidden: bool,
+    warn_context: str,
+) -> tuple[list[str], list[str], list[str]]:
+    """Return (combined, manual_filtered, area_filtered)."""
+    manual_filtered = _filter_configurable_lights(
+        hass,
+        manual_lights_raw,
+        warn_on_dropped=True,
+        context=warn_context,
+    )
+
+    area_filtered: list[str] = []
+    if area_id:
+        area_raw = await async_get_lights_in_area(hass, area_id, include_hidden=use_hidden)
+        area_filtered = _filter_configurable_lights(
+            hass,
+            area_raw,
+            warn_on_dropped=False,
+            context="area",
+        )
+
+    combined = sorted(set(manual_filtered) | set(area_filtered))
+    return combined, manual_filtered, area_filtered
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Periodic Lights."""
 
     VERSION = 1
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Handle the initial step where the user configures the setup."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -138,38 +193,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             max_brightness = int(user_input[CONF_MAX_BRIGHTNESS])
             min_kelvin = int(user_input[CONF_MIN_KELVIN])
             max_kelvin = int(user_input[CONF_MAX_KELVIN])
-            area_id: str | None = user_input.get(CONF_AREA_ID)
+            area_id = _normalize_area_id(user_input.get(CONF_AREA_ID))
             use_hidden: bool = bool(user_input.get(CONF_USE_HIDDEN, False))
             update_interval = int(user_input[CONF_UPDATE_INTERVAL])
             transition = int(user_input[CONF_TRANSITION])
 
-            # Expand area into light entities with optional hidden filtering
-            lights_from_area_raw: list[str] = []
-            if area_id:
-                lights_from_area_raw = await async_get_lights_in_area(
-                    self.hass,
-                    area_id,
-                    include_hidden=use_hidden,
-                )
-
-            # Filter out on/off-only lights
-            selected_lights = _filter_configurable_lights(
+            combined_lights, manual_filtered, _ = await _compute_combined_lights(
                 self.hass,
-                selected_lights_raw,
-                warn_on_dropped=True,
-                context="manual",
-            )
-            lights_from_area = _filter_configurable_lights(
-                self.hass,
-                lights_from_area_raw,
-                warn_on_dropped=False,
-                context="area",
+                manual_lights_raw=selected_lights_raw,
+                area_id=area_id,
+                use_hidden=use_hidden,
+                warn_context="manual",
             )
 
-            # Merge area lights + manual lights and dedupe
-            combined_lights = sorted(set(selected_lights) | set(lights_from_area))
-
-            # Validation (note: "no_lights" should have a strings.json entry)
             if not combined_lights:
                 errors["base"] = "no_lights"
             elif min_brightness < 0 or max_brightness > 100:
@@ -195,6 +231,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_AREA_ID: area_id,
                         CONF_USE_HIDDEN: use_hidden,
                         CONF_LIGHTS: combined_lights,
+                        OPT_MANUAL_LIGHTS: manual_filtered,
                         CONF_MIN_BRIGHTNESS: min_brightness,
                         CONF_MAX_BRIGHTNESS: max_brightness,
                         CONF_MIN_KELVIN: min_kelvin,
@@ -208,98 +245,32 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_NAME): str,
                 vol.Optional(CONF_AREA_ID): selector.selector({"area": {}}),
-                vol.Required(CONF_USE_HIDDEN, default=False): selector.selector(
-                    {"boolean": {}}
-                ),
+                vol.Required(CONF_USE_HIDDEN, default=False): selector.selector({"boolean": {}}),
                 vol.Optional(CONF_LIGHTS, default=[]): selector.selector(
                     {"entity": {"domain": "light", "multiple": True}}
                 ),
-                vol.Required(
-                    CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS
-                ): selector.selector(
-                    {
-                        "number": {
-                            "min": 0,
-                            "max": 100,
-                            "step": 1,
-                            "mode": "box",
-                            "unit_of_measurement": "%",
-                        }
-                    }
+                vol.Required(CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS): selector.selector(
+                    {"number": {"min": 0, "max": 100, "step": 1, "mode": "box", "unit_of_measurement": "%"}}
                 ),
-                vol.Required(
-                    CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS
-                ): selector.selector(
-                    {
-                        "number": {
-                            "min": 0,
-                            "max": 100,
-                            "step": 1,
-                            "mode": "box",
-                            "unit_of_measurement": "%",
-                        }
-                    }
+                vol.Required(CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS): selector.selector(
+                    {"number": {"min": 0, "max": 100, "step": 1, "mode": "box", "unit_of_measurement": "%"}}
                 ),
-                vol.Required(
-                    CONF_MIN_KELVIN, default=DEFAULT_MIN_KELVIN
-                ): selector.selector(
-                    {
-                        "number": {
-                            "min": 1500,
-                            "max": 6500,
-                            "step": 50,
-                            "mode": "box",
-                            "unit_of_measurement": "K",
-                        }
-                    }
+                vol.Required(CONF_MIN_KELVIN, default=DEFAULT_MIN_KELVIN): selector.selector(
+                    {"number": {"min": 1500, "max": 6500, "step": 50, "mode": "box", "unit_of_measurement": "K"}}
                 ),
-                vol.Required(
-                    CONF_MAX_KELVIN, default=DEFAULT_MAX_KELVIN
-                ): selector.selector(
-                    {
-                        "number": {
-                            "min": 1500,
-                            "max": 6500,
-                            "step": 50,
-                            "mode": "box",
-                            "unit_of_measurement": "K",
-                        }
-                    }
+                vol.Required(CONF_MAX_KELVIN, default=DEFAULT_MAX_KELVIN): selector.selector(
+                    {"number": {"min": 1500, "max": 6500, "step": 50, "mode": "box", "unit_of_measurement": "K"}}
                 ),
-                vol.Required(
-                    CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL
-                ): selector.selector(
-                    {
-                        "number": {
-                            "min": 10,
-                            "max": 3600,
-                            "step": 10,
-                            "mode": "box",
-                            "unit_of_measurement": "s",
-                        }
-                    }
+                vol.Required(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): selector.selector(
+                    {"number": {"min": 10, "max": 3600, "step": 10, "mode": "box", "unit_of_measurement": "s"}}
                 ),
-                vol.Required(
-                    CONF_TRANSITION, default=DEFAULT_TRANSITION
-                ): selector.selector(
-                    {
-                        "number": {
-                            "min": 0,
-                            "max": 60,
-                            "step": 1,
-                            "mode": "box",
-                            "unit_of_measurement": "s",
-                        }
-                    }
+                vol.Required(CONF_TRANSITION, default=DEFAULT_TRANSITION): selector.selector(
+                    {"number": {"min": 0, "max": 60, "step": 1, "mode": "box", "unit_of_measurement": "s"}}
                 ),
             }
         )
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=data_schema,
-            errors=errors,
-        )
+        return self.async_show_form(step_id="user", data_schema=data_schema, errors=errors)
 
     @staticmethod
     @callback
@@ -308,83 +279,98 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow for Periodic Lights (area/lights only)."""
+    """Handle options flow for Periodic Lights (only area/hidden/manual lights)."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        # NOTE: In some HA versions, OptionsFlow has a read-only config_entry property
-        # and does not accept args in super().__init__(). Store our own reference.
         self._config_entry = config_entry
+
+    def _get_effective(self, key: str, default: Any = None) -> Any:
+        """Options override data."""
+        if key in self._config_entry.options:
+            return self._config_entry.options.get(key)
+        return self._config_entry.data.get(key, default)
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
 
-        data = dict(self._config_entry.data)
-        current_area_id: str | None = data.get(CONF_AREA_ID)
-        current_use_hidden: bool = bool(data.get(CONF_USE_HIDDEN, False))
-        current_lights: list[str] = data.get(CONF_LIGHTS, [])
+        # Read stored values (options override data)
+        current_area_id = _area_id_from_storage(self._get_effective(CONF_AREA_ID, None))
+        current_use_hidden: bool = bool(self._get_effective(CONF_USE_HIDDEN, False))
+
+        # Manual selector defaults to manual list ONLY (authoritative),
+        # never to CONF_LIGHTS (combined), or area lights get “baked in”.
+        current_manual: list[str] = list(self._get_effective(OPT_MANUAL_LIGHTS, []))
 
         if user_input is not None:
-            area_id: str | None = user_input.get(CONF_AREA_ID)
+            # NOTE: when user clears the area, the selector may submit "" or omit the key;
+            # we normalize to None, then store sentinel "" so cleared persists.
+            area_id = _normalize_area_id(user_input.get(CONF_AREA_ID))
             use_hidden: bool = bool(user_input.get(CONF_USE_HIDDEN, False))
-            selected_lights_raw: list[str] = user_input.get(CONF_LIGHTS, [])
+            manual_raw: list[str] = user_input.get(CONF_LIGHTS, [])
 
-            lights_from_area_raw: list[str] = []
-            if area_id:
-                lights_from_area_raw = await async_get_lights_in_area(
-                    self.hass,
-                    area_id,
-                    include_hidden=use_hidden,
-                )
-
-            # Filter out on/off-only lights
-            selected_lights = _filter_configurable_lights(
+            combined_lights, manual_filtered, _ = await _compute_combined_lights(
                 self.hass,
-                selected_lights_raw,
-                warn_on_dropped=True,
-                context="options-manual",
+                manual_lights_raw=manual_raw,
+                area_id=area_id,
+                use_hidden=use_hidden,
+                warn_context="options-manual",
             )
-            lights_from_area = _filter_configurable_lights(
-                self.hass,
-                lights_from_area_raw,
-                warn_on_dropped=False,
-                context="options-area",
-            )
-
-            combined_lights = sorted(set(selected_lights) | set(lights_from_area))
 
             if not combined_lights:
                 errors["base"] = "no_lights"
             else:
-                new_data = {
-                    **data,
-                    CONF_AREA_ID: area_id,
-                    CONF_USE_HIDDEN: use_hidden,
-                    CONF_LIGHTS: combined_lights,
-                }
-                self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
-                await self.hass.config_entries.async_reload(self._config_entry.entry_id)
-                return self.async_create_entry(title="", data={})
+                _LOGGER.warning(
+                    "PL OPTIONS SUBMIT | area_id(raw)=%r normalized=%r use_hidden=%r "
+                    "manual_raw=%r manual_filtered=%r combined=%r",
+                    user_input.get(CONF_AREA_ID),
+                    area_id,
+                    use_hidden,
+                    manual_raw,
+                    manual_filtered,
+                    combined_lights,
+                )
 
+                return self.async_create_entry(
+                    title="",
+                    data={
+                        # store "" when cleared so we don't fall back to entry.data on reboot
+                        CONF_AREA_ID: _area_id_to_storage(area_id),
+                        CONF_USE_HIDDEN: use_hidden,
+                        OPT_MANUAL_LIGHTS: manual_filtered,
+                        # store combined for runtime convenience
+                        CONF_LIGHTS: combined_lights,
+                    },
+                )
+
+            # If we’re returning the form due to errors, keep user edits
             current_area_id = area_id
             current_use_hidden = use_hidden
-            current_lights = selected_lights_raw
+            current_manual = manual_raw
 
-        data_schema = vol.Schema(
-            {
-                vol.Optional(CONF_AREA_ID, default=current_area_id): selector.selector(
-                    {"area": {}}
-                ),
-                vol.Required(
-                    CONF_USE_HIDDEN, default=current_use_hidden
-                ): selector.selector({"boolean": {}}),
-                vol.Optional(CONF_LIGHTS, default=current_lights): selector.selector(
-                    {"entity": {"domain": "light", "multiple": True}}
-                ),
-            }
-        )
+        # ----------------------------
+        # IMPORTANT SCHEMA FIX:
+        # Do NOT use `default=current_area_id` for the area selector.
+        # Use suggested_value instead so the UI pre-fills but clearing works.
+        # ----------------------------
+        schema_fields: dict[Any, Any] = {
+            vol.Optional(
+                CONF_AREA_ID,
+                description={"suggested_value": current_area_id or ""},
+            ): selector.selector({"area": {}}),
+
+            vol.Required(
+                CONF_USE_HIDDEN,
+                default=current_use_hidden,
+            ): selector.selector({"boolean": {}}),
+
+            vol.Optional(
+                CONF_LIGHTS,
+                default=current_manual,
+            ): selector.selector({"entity": {"domain": "light", "multiple": True}}),
+        }
 
         return self.async_show_form(
             step_id="init",
-            data_schema=data_schema,
+            data_schema=vol.Schema(schema_fields),
             errors=errors,
         )
