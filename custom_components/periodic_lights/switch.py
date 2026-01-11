@@ -1,13 +1,17 @@
+# switch.py
 from __future__ import annotations
 
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+
 
 from .const import (
     DOMAIN,
@@ -22,6 +26,13 @@ from .const import (
     ATTR_USE_FIXED_MIN_TIME,
 )
 from .light_control import async_update_lights_for_entry
+
+# Must match __init__.py runtime keys
+ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"
+ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"
+
+# Must match __init__.py
+SIGNAL_ENTRY_STATE = "periodic_lights_entry_state"
 
 
 async def async_setup_entry(
@@ -41,7 +52,7 @@ async def async_setup_entry(
         PeriodicLightsColorTempSwitch(hass, entry.entry_id, name),
         PeriodicLightsBedtimeSwitch(hass, entry.entry_id, name),
         PeriodicLightsTransitionOnTurnOnSwitch(hass, entry.entry_id, name),
-        PeriodicLightsFixedMinSwitch(hass, entry.entry_id, name),  # <-- add this
+        PeriodicLightsFixedMinSwitch(hass, entry.entry_id, name),
     ]
 
     async_add_entities(entities)
@@ -84,30 +95,52 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
         self._attr_name = f"{setup_name} Enabled"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_enabled"
 
+    def _name_for(self, entity_id: str) -> str:
+        st = self.hass.states.get(entity_id)
+        return st.name if st and st.name else entity_id
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose both light entity_ids and human-friendly names."""
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
-        if data is not None:
-            lights: list[str] = data.get(CONF_LIGHTS, []) or []
+        """Expose light lists and runtime state (controlled/overridden)."""
+        state = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+
+        if state is not None:
+            lights: list[str] = state.get(CONF_LIGHTS, []) or []
+            controlled_set = state.get(ATTR_CONTROLLED_LIGHTS, set()) or set()
+            overridden_set = state.get(ATTR_OVERRIDDEN_LIGHTS, set()) or set()
         else:
             lights = self._lights or []
+            controlled_set = set()
+            overridden_set = set()
 
-        light_names: list[str] = []
-        for entity_id in lights:
-            state = self.hass.states.get(entity_id)
-            if state is not None:
-                light_names.append(state.name)
-            else:
-                light_names.append(entity_id)
+        controlled_lights = sorted(set(controlled_set))
+        overridden_lights = sorted(set(overridden_set))
 
         return {
             "lights": lights,
-            "light_names": light_names,
+            "light_names": [self._name_for(eid) for eid in lights],
+            "controlled_lights": controlled_lights,
+            "controlled_light_names": [self._name_for(eid) for eid in controlled_lights],
+            "overridden_lights": overridden_lights,
+            "overridden_light_names": [self._name_for(eid) for eid in overridden_lights],
         }
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+
+        # Subscribe to integration state changes so attributes update reliably
+        @callback
+        def _handle_entry_state_update() -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_ENTRY_STATE}_{self._entry_id}",
+                _handle_entry_state_update,
+            )
+        )
+
         old_state = await self.async_get_last_state()
         if old_state is not None:
             self._is_on = old_state.state == "on"
@@ -134,8 +167,22 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
             data[ATTR_ENABLED] = False
+
+            # Clear manual override + control tracking when disabling the integration
+            data[ATTR_OVERRIDDEN_LIGHTS] = set()
+            data[ATTR_CONTROLLED_LIGHTS] = set()
+
+            # These keys exist in hass.data (runtime-only) and should be reset too
+            data.pop("pl_expected_changes", None)
+            data.pop("pl_last_applied", None)
+
         self.async_write_ha_state()
-        # No immediate change; we just stop future updates.
+
+        # Force attribute refresh immediately (so UI doesn't show stale overridden/controlled)
+        async_dispatcher_send(self.hass, f"{SIGNAL_ENTRY_STATE}_{self._entry_id}")
+
+        # No immediate light changes; we just stop future updates.
+
 
 
 class PeriodicLightsBrightnessSwitch(_BasePeriodicSwitch):
@@ -230,7 +277,7 @@ class PeriodicLightsBedtimeSwitch(_BasePeriodicSwitch):
         if old_state is not None:
             self._is_on = old_state.state == "on"
         else:
-            self._is_on = False  # default: bedtime off
+            self._is_on = False
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
@@ -254,7 +301,6 @@ class PeriodicLightsBedtimeSwitch(_BasePeriodicSwitch):
             data[ATTR_BEDTIME] = False
         self.async_write_ha_state()
 
-        # Immediately move lights back to the normal curve (if master/etc. allow)
         self.hass.async_create_task(
             async_update_lights_for_entry(self.hass, self._entry_id, force=True)
         )
@@ -274,7 +320,7 @@ class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
         if old_state is not None:
             self._is_on = old_state.state == "on"
         else:
-            self._is_on = True  # default: enabled
+            self._is_on = True
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
@@ -287,7 +333,6 @@ class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
             data[ATTR_TRANSITION_ON_TURN_ON] = True
         self.async_write_ha_state()
 
-        # Optionally bring any already-on lights to the current desired settings
         self.hass.async_create_task(
             async_update_lights_for_entry(self.hass, self._entry_id, force=True)
         )
@@ -298,7 +343,7 @@ class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
         if data is not None:
             data[ATTR_TRANSITION_ON_TURN_ON] = False
         self.async_write_ha_state()
-        # No immediate change; we just stop reacting to future light-on events.
+
 
 class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
     """Switch to enable using the fixed minimum-time override."""
@@ -314,7 +359,7 @@ class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
         if old_state is not None:
             self._is_on = old_state.state == "on"
         else:
-            self._is_on = False  # default: off
+            self._is_on = False
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
@@ -327,7 +372,6 @@ class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
             data[ATTR_USE_FIXED_MIN_TIME] = True
         self.async_write_ha_state()
 
-        # Changing this should immediately update sensors/lights
         self.hass.async_create_task(
             async_update_lights_for_entry(self.hass, self._entry_id, force=True)
         )
@@ -339,7 +383,6 @@ class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
             data[ATTR_USE_FIXED_MIN_TIME] = False
         self.async_write_ha_state()
 
-        # Also update immediately to revert to solar-based min
         self.hass.async_create_task(
             async_update_lights_for_entry(self.hass, self._entry_id, force=True)
         )

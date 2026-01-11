@@ -15,6 +15,7 @@ CONF_TRANSITION = "transition"            # seconds
 
 # Dispatcher signal used to notify sensors they should recalculate immediately
 SIGNAL_UPDATE_SENSORS = "periodic_lights_update_sensors"
+SIGNAL_ENTRY_STATE = "periodic_lights_entry_state"
 
 # Runtime flags stored in hass.data for each entry
 ATTR_ENABLED = "enabled"
