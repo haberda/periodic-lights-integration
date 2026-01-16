@@ -42,6 +42,7 @@ from .const import (
     DEFAULT_TRANSITION,
     DEFAULT_SHAPING_PARAM,
     DEFAULT_SHAPING_FUNCTION,
+    SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
 )
 from .light_control import async_update_lights_for_entry
 
@@ -65,9 +66,6 @@ ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # set[str]
 
 # ---- Override detection gating (runtime only) ----
 ATTR_OVERRIDE_DETECTION_READY = "pl_override_detection_ready"  # bool
-
-# ---- Dispatcher signal to refresh entity attributes (runtime only) ----
-SIGNAL_ENTRY_STATE = "periodic_lights_entry_state"
 
 
 def _normalize_area_value(value):
@@ -146,7 +144,6 @@ def _get_kelvin_from_state(state) -> int | None:
         except (TypeError, ValueError):
             return None
 
-    # Fallback: mireds
     mired = a.get("color_temp")
     if mired is None:
         return None
@@ -160,10 +157,7 @@ def _get_kelvin_from_state(state) -> int | None:
 
 
 def _get_color_fingerprint(state) -> tuple[Any, ...] | None:
-    """Return a tuple fingerprint of color-related attributes.
-
-    If user changes color (xy/rgb/hs/etc), this should change.
-    """
+    """Return a tuple fingerprint of color-related attributes."""
     if state is None:
         return None
     a = state.attributes
@@ -181,7 +175,6 @@ def _get_color_fingerprint(state) -> tuple[Any, ...] | None:
 def _now_ts(hass: HomeAssistant) -> float:
     """Timestamp in seconds (UTC epoch is fine here)."""
     from homeassistant.util import dt as dt_util
-
     return dt_util.utcnow().timestamp()
 
 
@@ -192,11 +185,7 @@ def _matches_expected(
     brightness_enabled: bool,
     color_temp_enabled: bool,
 ) -> bool:
-    """Return True if this state change likely came from Periodic Lights.
-
-    IMPORTANT: Some integrations/devices do not report brightness/CT back reliably
-    (or only report CT in mired). We treat "missing reporting" as non-fatal.
-    """
+    """Return True if this state change likely came from Periodic Lights."""
     until = expected.get("until")
     if until is None:
         return False
@@ -267,7 +256,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     setup_name = entry.data.get("name", entry.title)
 
     def _notify_entry_state_changed() -> None:
-        async_dispatcher_send(hass, f"{SIGNAL_ENTRY_STATE}_{entry.entry_id}")
+        # IMPORTANT: match what switch.py listens for
+        async_dispatcher_send(hass, f"{SIGNAL_REFRESH_ENTITIES}_{entry.entry_id}")
 
     # ---- Effective config values (options override data) ----
     area_val = _normalize_area_value(_get_effective(entry, CONF_AREA_ID, None))
@@ -285,7 +275,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     area_lights: list[str] = []
     if area_val:
         from .config_flow import async_get_lights_in_area  # avoid import cycle
-
         area_raw = await async_get_lights_in_area(hass, area_val, include_hidden=use_hidden)
         area_lights = _filter_configurable_lights(hass, area_raw)
 
@@ -373,14 +362,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _notify_entry_state_changed()
 
     @callback
-    def _clear_control_for_light(state: dict[str, Any], light_id: str) -> None:
-        controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS, set())
-        before = light_id in controlled
-        controlled.discard(light_id)
-        if before:
-            _notify_entry_state_changed()
-
-    @callback
     def _mark_control_for_light_once(state: dict[str, Any], light_id: str) -> None:
         controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS)
         if controlled is None or not isinstance(controlled, set):
@@ -389,10 +370,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # If it was overridden, taking control clears override
         overrides: set[str] = state.get(ATTR_OVERRIDDEN_LIGHTS, set())
+        was_overridden = light_id in overrides
         overrides.discard(light_id)
 
-        if light_id in controlled:
-            # Still worth notifying if we just cleared override
+        # Only emit logbook once per on-session, but allow logging when it was overridden
+        if light_id in controlled and not was_overridden:
             _notify_entry_state_changed()
             return
 
@@ -401,14 +383,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _notify_entry_state_changed()
 
     @callback
-    def _mark_overridden(state: dict[str, Any], light_id: str) -> bool:
-        """Return True if this call newly-overrode the light."""
+    def _mark_overridden(state: dict[str, Any], light_id: str) -> None:
         overrides: set[str] = state.get(ATTR_OVERRIDDEN_LIGHTS, set())
         already_overridden = light_id in overrides
         overrides.add(light_id)
         state[ATTR_OVERRIDDEN_LIGHTS] = overrides
 
-        # A light cannot be both controlled and overridden.
+        # Remove from "controlled once" set so we can log takeover again later
         controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS, set())
         controlled.discard(light_id)
 
@@ -416,7 +397,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _logbook_overridden(hass, setup_name=setup_name, light_id=light_id)
 
         _notify_entry_state_changed()
-        return not already_overridden
 
     @callback
     def _handle_light_state_change(event) -> None:
@@ -439,7 +419,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if not new_on:
             _clear_override_for_light(state, entity_id)
-            _clear_control_for_light(state, entity_id)
+            # also clear controlled-once tracking when the light turns off
+            controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS, set())
+            if entity_id in controlled:
+                controlled.discard(entity_id)
+                _notify_entry_state_changed()
             return
 
         if new_on and not old_on:
@@ -593,6 +577,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
 
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
+
+    # Initial refresh so attributes populate quickly after platform add
+    _notify_entry_state_changed()
 
     return True
 
