@@ -1,11 +1,15 @@
+# __init__.py
 from __future__ import annotations
 
 import logging
 from pprint import pformat
+from typing import Any
 
+from homeassistant.components import logbook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.typing import ConfigType
 
@@ -38,6 +42,7 @@ from .const import (
     DEFAULT_TRANSITION,
     DEFAULT_SHAPING_PARAM,
     DEFAULT_SHAPING_FUNCTION,
+    SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
 )
 from .light_control import async_update_lights_for_entry
 
@@ -50,6 +55,17 @@ OPT_MANUAL_LIGHTS = "manual_lights"
 
 # If your options flow stores a sentinel for "cleared"
 AREA_CLEARED = "__cleared__"
+
+# ---- Manual override tracking keys (runtime only; stored in hass.data[DOMAIN][entry_id]) ----
+ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"  # set[str]
+ATTR_EXPECTED_CHANGES = "pl_expected_changes"  # dict[light_id, dict[str, Any]]
+ATTR_LAST_APPLIED = "pl_last_applied"  # dict[light_id, dict[str, Any]]
+
+# ---- Control tracking for logbook (runtime only) ----
+ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # set[str]
+
+# ---- Override detection gating (runtime only) ----
+ATTR_OVERRIDE_DETECTION_READY = "pl_override_detection_ready"  # bool
 
 
 def _normalize_area_value(value):
@@ -95,6 +111,132 @@ def _filter_configurable_lights(hass: HomeAssistant, entity_ids: list[str]) -> l
     return sorted(set(kept))
 
 
+def _get_brightness_pct_from_state(state) -> int | None:
+    """Best-effort brightness percent from HA state (0-255 brightness)."""
+    if state is None:
+        return None
+    bri = state.attributes.get("brightness")
+    if bri is None:
+        return None
+    try:
+        bri_i = int(bri)
+    except (TypeError, ValueError):
+        return None
+    return int(round((bri_i / 255.0) * 100.0))
+
+
+def _get_kelvin_from_state(state) -> int | None:
+    """Best-effort color temp in Kelvin from HA state.
+
+    Some lights expose:
+      - color_temp_kelvin (preferred)
+      - color_temp (mireds)  -> convert to kelvin via 1e6 / mired
+    """
+    if state is None:
+        return None
+
+    a = state.attributes
+
+    k = a.get("color_temp_kelvin")
+    if k is not None:
+        try:
+            return int(round(float(k)))
+        except (TypeError, ValueError):
+            return None
+
+    mired = a.get("color_temp")
+    if mired is None:
+        return None
+    try:
+        m = float(mired)
+        if m <= 0:
+            return None
+        return int(round(1_000_000.0 / m))
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_color_fingerprint(state) -> tuple[Any, ...] | None:
+    """Return a tuple fingerprint of color-related attributes."""
+    if state is None:
+        return None
+    a = state.attributes
+    return (
+        a.get("color_mode"),
+        a.get("xy_color"),
+        a.get("hs_color"),
+        a.get("rgb_color"),
+        a.get("rgbw_color"),
+        a.get("rgbww_color"),
+        a.get("effect"),
+    )
+
+
+def _now_ts(hass: HomeAssistant) -> float:
+    """Timestamp in seconds (UTC epoch is fine here)."""
+    from homeassistant.util import dt as dt_util
+    return dt_util.utcnow().timestamp()
+
+
+def _matches_expected(
+    *,
+    expected: dict[str, Any],
+    new_state,
+    brightness_enabled: bool,
+    color_temp_enabled: bool,
+) -> bool:
+    """Return True if this state change likely came from Periodic Lights."""
+    until = expected.get("until")
+    if until is None:
+        return False
+
+    exp_bri = expected.get("brightness_pct")
+    exp_kelvin = expected.get("color_temp_kelvin")
+    exp_wants_color = expected.get("expects_color_change", False)
+
+    if exp_bri is not None and brightness_enabled:
+        new_bri = _get_brightness_pct_from_state(new_state)
+        if new_bri is not None and abs(int(new_bri) - int(exp_bri)) > 2:
+            return False
+
+    if exp_kelvin is not None and color_temp_enabled:
+        new_k = _get_kelvin_from_state(new_state)
+        if new_k is not None and abs(int(new_k) - int(exp_kelvin)) > 75:
+            return False
+
+    if exp_wants_color:
+        return False
+
+    return True
+
+
+def _light_name(hass: HomeAssistant, entity_id: str) -> str:
+    st = hass.states.get(entity_id)
+    if st is None:
+        return entity_id
+    return st.name or entity_id
+
+
+def _logbook_under_control(hass: HomeAssistant, *, setup_name: str, light_id: str) -> None:
+    logbook.async_log_entry(
+        hass,
+        name="Periodic Lights",
+        message=f"{setup_name}: Periodic Lights now controlling {_light_name(hass, light_id)}",
+        domain=DOMAIN,
+        entity_id=light_id,
+    )
+
+
+def _logbook_overridden(hass: HomeAssistant, *, setup_name: str, light_id: str) -> None:
+    logbook.async_log_entry(
+        hass,
+        name="Periodic Lights",
+        message=f"{setup_name}: Periodic Lights manual override detected for {_light_name(hass, light_id)}",
+        domain=DOMAIN,
+        entity_id=light_id,
+    )
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up Periodic Lights from YAML (unused)."""
     return True
@@ -111,15 +253,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
 
+    setup_name = entry.data.get("name", entry.title)
+
+    def _notify_entry_state_changed() -> None:
+        # IMPORTANT: match what switch.py listens for
+        async_dispatcher_send(hass, f"{SIGNAL_REFRESH_ENTITIES}_{entry.entry_id}")
+
     # ---- Effective config values (options override data) ----
     area_val = _normalize_area_value(_get_effective(entry, CONF_AREA_ID, None))
     use_hidden = bool(_get_effective(entry, CONF_USE_HIDDEN, False))
 
-    # Manual lights are authoritative. We must respect an explicit empty list.
-    # Priority:
-    # 1) options.manual_lights (even if [])
-    # 2) data.manual_lights
-    # 3) legacy fallback: options.lights / data.lights
     if OPT_MANUAL_LIGHTS in entry.options:
         manual_val = entry.options.get(OPT_MANUAL_LIGHTS)
     elif OPT_MANUAL_LIGHTS in entry.data:
@@ -129,31 +272,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     manual_lights = _filter_configurable_lights(hass, list(manual_val or []))
 
-    # Area lights are additional; query on every setup/reload
     area_lights: list[str] = []
     if area_val:
-        from .config_flow import async_get_lights_in_area  # avoid import cycle at module import time
-
+        from .config_flow import async_get_lights_in_area  # avoid import cycle
         area_raw = await async_get_lights_in_area(hass, area_val, include_hidden=use_hidden)
         area_lights = _filter_configurable_lights(hass, area_raw)
 
     effective_lights = sorted(set(manual_lights) | set(area_lights))
 
-    entry_state = {
-        # Config
+    entry_state: dict[str, Any] = {
         CONF_AREA_ID: area_val,
         CONF_USE_HIDDEN: use_hidden,
         CONF_LIGHTS: effective_lights,
-
-        # The rest stays as-is (entities handle most post-setup config)
         CONF_MIN_BRIGHTNESS: _get_effective(entry, CONF_MIN_BRIGHTNESS, 0),
         CONF_MAX_BRIGHTNESS: _get_effective(entry, CONF_MAX_BRIGHTNESS, 100),
         CONF_MIN_KELVIN: _get_effective(entry, CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN),
         CONF_MAX_KELVIN: _get_effective(entry, CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN),
         CONF_UPDATE_INTERVAL: _get_effective(entry, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
         CONF_TRANSITION: _get_effective(entry, CONF_TRANSITION, DEFAULT_TRANSITION),
-
-        # Runtime flags
         ATTR_ENABLED: True,
         ATTR_BRIGHTNESS_ENABLED: True,
         ATTR_COLOR_TEMP_ENABLED: True,
@@ -161,19 +297,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ATTR_LIGHT_SETTINGS: {},
         ATTR_LAST_LIGHT_UPDATE: None,
         ATTR_TRANSITION_ON_TURN_ON: True,
-
         ATTR_USE_FIXED_MIN_TIME: False,
         ATTR_FIXED_MIN_TIME: 0.0,
-
-        # Shaping defaults
         ATTR_SHAPING_PARAM: DEFAULT_SHAPING_PARAM,
         ATTR_SHAPING_FUNCTION: DEFAULT_SHAPING_FUNCTION,
-
-        # Internal
+        ATTR_OVERRIDDEN_LIGHTS: set(),
+        ATTR_EXPECTED_CHANGES: {},
+        ATTR_LAST_APPLIED: {},
+        ATTR_CONTROLLED_LIGHTS: set(),
+        ATTR_OVERRIDE_DETECTION_READY: False,
         ATTR_LIGHT_ON_LISTENER: None,
     }
 
     hass.data[DOMAIN][entry.entry_id] = entry_state
+
+    # ---- Enable override detection after HA startup + grace ----
+    @callback
+    def _enable_override_detection(_now=None) -> None:
+        st = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if not st:
+            return
+        st[ATTR_OVERRIDE_DETECTION_READY] = True
+        _LOGGER.debug("PL OVERRIDE DETECTION READY | entry_id=%s", entry.entry_id)
+
+    def _schedule_override_detection_enable() -> None:
+        entry.async_on_unload(async_call_later(hass, 15, _enable_override_detection))
+
+    if hass.is_running:
+        _schedule_override_detection_enable()
+    else:
+        @callback
+        def _on_started_for_override(_event) -> None:
+            _schedule_override_detection_enable()
+
+        entry.async_on_unload(
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started_for_override)
+        )
 
     # ---- Reload entry when options change ----
     async def _update_listener(_hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
@@ -181,14 +340,69 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_update_listener))
 
-    # ---- Listener for configured lights turning on ----
+    # ---- Listener for configured lights state changes ----
     unsub = entry_state.get(ATTR_LIGHT_ON_LISTENER)
     if unsub is not None:
         unsub()
         entry_state[ATTR_LIGHT_ON_LISTENER] = None
 
-    async def _handle_light_state_change(event) -> None:
-        entity_id = event.data.get("entity_id")
+    @callback
+    def _clear_override_for_light(state: dict[str, Any], light_id: str) -> None:
+        overrides: set[str] = state.get(ATTR_OVERRIDDEN_LIGHTS, set())
+        before = light_id in overrides
+        overrides.discard(light_id)
+
+        expected = state.get(ATTR_EXPECTED_CHANGES, {})
+        expected.pop(light_id, None)
+
+        last = state.get(ATTR_LAST_APPLIED, {})
+        last.pop(light_id, None)
+
+        if before:
+            _notify_entry_state_changed()
+
+    @callback
+    def _mark_control_for_light_once(state: dict[str, Any], light_id: str) -> None:
+        controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS)
+        if controlled is None or not isinstance(controlled, set):
+            controlled = set()
+            state[ATTR_CONTROLLED_LIGHTS] = controlled
+
+        # If it was overridden, taking control clears override
+        overrides: set[str] = state.get(ATTR_OVERRIDDEN_LIGHTS, set())
+        was_overridden = light_id in overrides
+        overrides.discard(light_id)
+
+        # Only emit logbook once per on-session, but allow logging when it was overridden
+        if light_id in controlled and not was_overridden:
+            _notify_entry_state_changed()
+            return
+
+        controlled.add(light_id)
+        _logbook_under_control(hass, setup_name=setup_name, light_id=light_id)
+        _notify_entry_state_changed()
+
+    @callback
+    def _mark_overridden(state: dict[str, Any], light_id: str) -> None:
+        overrides: set[str] = state.get(ATTR_OVERRIDDEN_LIGHTS, set())
+        already_overridden = light_id in overrides
+        overrides.add(light_id)
+        state[ATTR_OVERRIDDEN_LIGHTS] = overrides
+
+        # Remove from "controlled once" set so we can log takeover again later
+        controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS, set())
+        controlled.discard(light_id)
+
+        if not already_overridden:
+            _logbook_overridden(hass, setup_name=setup_name, light_id=light_id)
+
+        _notify_entry_state_changed()
+
+    @callback
+    def _handle_light_state_change(event) -> None:
+        entity_id: str | None = event.data.get("entity_id")
+        if not entity_id:
+            return
 
         state = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
         lights: list[str] = state.get(CONF_LIGHTS, []) or []
@@ -202,20 +416,96 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         old_on = old_state is not None and old_state.state == "on"
         new_on = new_state.state == "on"
-        if not new_on or old_on:
+
+        if not new_on:
+            _clear_override_for_light(state, entity_id)
+            # also clear controlled-once tracking when the light turns off
+            controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS, set())
+            if entity_id in controlled:
+                controlled.discard(entity_id)
+                _notify_entry_state_changed()
             return
 
-        if not state.get(ATTR_TRANSITION_ON_TURN_ON, True):
+        if new_on and not old_on:
+            _clear_override_for_light(state, entity_id)
+            _mark_control_for_light_once(state, entity_id)
+
+            if state.get(ATTR_TRANSITION_ON_TURN_ON, True):
+                hass.async_create_task(async_update_lights_for_entry(hass, entry.entry_id, force=True))
             return
 
-        hass.async_create_task(async_update_lights_for_entry(hass, entry.entry_id, force=True))
+        if not state.get(ATTR_ENABLED, True):
+            return
+
+        # ---- Startup gating: ignore "manual override" detection until ready ----
+        if not bool(state.get(ATTR_OVERRIDE_DETECTION_READY, False)):
+            last: dict[str, Any] = state.get(ATTR_LAST_APPLIED, {}) or {}
+            last[entity_id] = {
+                "brightness_pct": _get_brightness_pct_from_state(new_state),
+                "color_temp_kelvin": _get_kelvin_from_state(new_state),
+                "color_fp": _get_color_fingerprint(new_state),
+            }
+            state[ATTR_LAST_APPLIED] = last
+            return
+
+        brightness_enabled = bool(state.get(ATTR_BRIGHTNESS_ENABLED, True))
+        color_temp_enabled = bool(state.get(ATTR_COLOR_TEMP_ENABLED, True))
+
+        old_bri = _get_brightness_pct_from_state(old_state)
+        new_bri = _get_brightness_pct_from_state(new_state)
+
+        old_k = _get_kelvin_from_state(old_state)
+        new_k = _get_kelvin_from_state(new_state)
+
+        old_color = _get_color_fingerprint(old_state)
+        new_color = _get_color_fingerprint(new_state)
+
+        bri_changed = (old_bri is not None or new_bri is not None) and (old_bri != new_bri)
+        ct_changed = (old_k is not None or new_k is not None) and (old_k != new_k)
+        color_changed = old_color != new_color
+
+        relevant_change = (brightness_enabled and bri_changed) or (color_temp_enabled and ct_changed) or color_changed
+        if not relevant_change:
+            return
+
+        expected_map: dict[str, Any] = state.get(ATTR_EXPECTED_CHANGES, {}) or {}
+        expected = expected_map.get(entity_id)
+
+        if expected is not None:
+            now_ts = _now_ts(hass)
+            until = expected.get("until")
+            if until is not None and now_ts <= float(until):
+                if _matches_expected(
+                    expected=expected,
+                    new_state=new_state,
+                    brightness_enabled=brightness_enabled,
+                    color_temp_enabled=color_temp_enabled,
+                ):
+                    last: dict[str, Any] = state.get(ATTR_LAST_APPLIED, {}) or {}
+                    last[entity_id] = {
+                        "brightness_pct": _get_brightness_pct_from_state(new_state),
+                        "color_temp_kelvin": _get_kelvin_from_state(new_state),
+                        "color_fp": _get_color_fingerprint(new_state),
+                    }
+                    state[ATTR_LAST_APPLIED] = last
+                    return
+
+        _mark_overridden(state, entity_id)
+
+        _LOGGER.debug(
+            "PL OVERRIDE SET | entry_id=%s light=%s (bri_changed=%s ct_changed=%s color_changed=%s)",
+            entry.entry_id,
+            entity_id,
+            bri_changed,
+            ct_changed,
+            color_changed,
+        )
 
     if effective_lights:
         entry_state[ATTR_LIGHT_ON_LISTENER] = async_track_state_change_event(
             hass, effective_lights, _handle_light_state_change
         )
 
-    # Forward platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # ---- Post-start refresh: area may be incomplete during early startup ----
@@ -241,11 +531,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return sorted(set(manual2) | set(area2))
 
     def _apply_effective_lights(new_lights: list[str]) -> None:
-        state = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-        if not state:
+        st = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if not st:
             return
 
-        old_lights = list(state.get(CONF_LIGHTS, []) or [])
+        old_lights = list(st.get(CONF_LIGHTS, []) or [])
         if old_lights == new_lights:
             return
 
@@ -256,18 +546,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             len(new_lights),
         )
 
-        state[CONF_LIGHTS] = new_lights
+        st[CONF_LIGHTS] = new_lights
 
-        # Rebind listener
-        unsub2 = state.get(ATTR_LIGHT_ON_LISTENER)
+        unsub2 = st.get(ATTR_LIGHT_ON_LISTENER)
         if unsub2 is not None:
             unsub2()
-            state[ATTR_LIGHT_ON_LISTENER] = None
+            st[ATTR_LIGHT_ON_LISTENER] = None
 
         if new_lights:
-            state[ATTR_LIGHT_ON_LISTENER] = async_track_state_change_event(
+            st[ATTR_LIGHT_ON_LISTENER] = async_track_state_change_event(
                 hass, new_lights, _handle_light_state_change
             )
+
+        _notify_entry_state_changed()
 
     async def _do_poststart_refresh(_now=None) -> None:
         try:
@@ -286,6 +577,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
 
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
+
+    # Initial refresh so attributes populate quickly after platform add
+    _notify_entry_state_changed()
 
     return True
 

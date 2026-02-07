@@ -16,6 +16,9 @@ CONF_TRANSITION = "transition"            # seconds
 # Dispatcher signal used to notify sensors they should recalculate immediately
 SIGNAL_UPDATE_SENSORS = "periodic_lights_update_sensors"
 
+# Dispatcher signal used to refresh entities (switch attributes, etc.)
+SIGNAL_REFRESH_ENTITIES = "periodic_lights_refresh_entities"
+
 # Runtime flags stored in hass.data for each entry
 ATTR_ENABLED = "enabled"
 ATTR_BRIGHTNESS_ENABLED = "brightness_enabled"
@@ -38,11 +41,12 @@ DEFAULT_MAX_BRIGHTNESS = 100
 DEFAULT_MIN_KELVIN = 2500
 DEFAULT_MAX_KELVIN = 5000
 DEFAULT_UPDATE_INTERVAL = 300       # seconds
-DEFAULT_TRANSITION = 5             # seconds
-DEFAULT_SHAPING_PARAM = 1.0        # Gamma=1 => baseline half-sine
+DEFAULT_TRANSITION = 5              # seconds
+DEFAULT_SHAPING_PARAM = 1.0         # Gamma=1 => baseline half-sine
 DEFAULT_SHAPING_FUNCTION = "gamma_sine"
 DEFAULT_FIXED_MIN_TIME = "00:00"
 
-PLATFORMS = ["switch", "sensor", "number", "select", "time"]
+# Add "button"
+PLATFORMS = ["switch", "sensor", "number", "select", "time", "button"]
 
 MANUFACTURER = "Periodic Lights"

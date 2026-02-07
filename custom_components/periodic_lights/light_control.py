@@ -43,15 +43,14 @@ from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
 
 _LOGGER = logging.getLogger(__name__)
 
+# Must match __init__.py runtime keys
+ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"
+ATTR_EXPECTED_CHANGES = "pl_expected_changes"
+ATTR_LAST_APPLIED = "pl_last_applied"
+
 
 def _parse_fixed_min_seconds(raw: Any) -> float:
-    """Parse ATTR_FIXED_MIN_TIME into seconds since midnight.
-
-    Accepts:
-      - float/int  -> seconds since midnight
-      - "HH:MM"    -> parsed as hours & minutes
-      - "HH:MM:SS" -> parsed as hours, minutes, seconds
-    """
+    """Parse ATTR_FIXED_MIN_TIME into seconds since midnight."""
     if raw is None:
         return 0.0
 
@@ -126,27 +125,19 @@ def _log_action(
     brightness_pct: int | None = None,
     kelvin: int | None = None,
     transition: float | None = None,
-    logbook = False,
+    log_to_logbook: bool = False,
 ) -> None:
     """Add contextual traceability in Logbook + debug logs."""
-    # Logbook (human)
-    parts: list[str] = [f"{reason}: {action}"]
-    # if brightness_pct is not None:
-    #     parts.append(f"Brightness={brightness_pct}")
-    # if kelvin is not None:
-    #     parts.append(f"Kelvin={kelvin}")
-    # if transition is not None:
-    #     parts.append(f"Transition={transition:g}s")
-    if logbook:
+    if log_to_logbook:
+        parts: list[str] = [f"{reason}: {action}"]
         logbook.async_log_entry(
             hass,
             name="Periodic Lights",
-            message= ", ".join(parts),
+            message=", ".join(parts),
             domain=DOMAIN,
             entity_id=light_id,
         )
 
-    # Debug (structured)
     _LOGGER.debug(
         "PL ACTION | entry_id=%s light=%s action=%s reason=%s bri=%s kelvin=%s transition=%s",
         entry_id,
@@ -159,25 +150,40 @@ def _log_action(
     )
 
 
+def _record_expected_change(
+    entry_data: dict[str, Any],
+    *,
+    light_ids: list[str],
+    brightness_pct: int | None,
+    kelvin: int | None,
+    transition: float,
+) -> None:
+    """Record what we *expect* the device state to become soon."""
+    now_ts = dt_util.utcnow().timestamp()
+    window = max(2.0, float(transition) + 2.0) if transition > 0 else 2.0
+    until = now_ts + window
+
+    expected_map: dict[str, Any] = entry_data.get(ATTR_EXPECTED_CHANGES)
+    if expected_map is None or not isinstance(expected_map, dict):
+        expected_map = {}
+        entry_data[ATTR_EXPECTED_CHANGES] = expected_map
+
+    for lid in light_ids:
+        expected_map[lid] = {
+            "until": until,
+            "brightness_pct": brightness_pct,
+            "color_temp_kelvin": kelvin,
+            "expects_color_change": False,
+        }
+
+
 async def async_update_lights_for_entry(
     hass: HomeAssistant,
     entry_id: str,
     *,
     force: bool = False,
 ) -> None:
-    """Apply current settings to all configured lights for this entry.
-
-    Key behavior:
-      - Only acts on lights that are currently ON.
-      - If desired brightness < 1, issues light.turn_off (with transition).
-      - If transition > 0 and supported_color_modes == {'xy'} AND we are setting BOTH
-        brightness and color_temp, then split into two calls:
-          1) brightness + transition
-          2) wait full transition
-          3) color_temp_kelvin + transition
-      - Otherwise uses a single call.
-      - Groups lights into batched service calls whenever possible.
-    """
+    """Apply current settings to all configured lights for this entry."""
     domain_data = hass.data.get(DOMAIN)
     if not domain_data:
         if force:
@@ -190,11 +196,9 @@ async def async_update_lights_for_entry(
             async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
         return
 
-    # Always notify sensors on forced updates so they recalc immediately.
     if force:
         async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
 
-    # Master enable: if off, *no* updates to any light.
     if not entry_data.get(ATTR_ENABLED, True):
         return
 
@@ -202,7 +206,6 @@ async def async_update_lights_for_entry(
     if not lights:
         return
 
-    # Interval throttling (unless forced)
     interval = float(entry_data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
     now = dt_util.utcnow()
     last_update = entry_data.get(ATTR_LAST_LIGHT_UPDATE)
@@ -229,20 +232,14 @@ async def async_update_lights_for_entry(
 
     reason = _reason(entry_data, force=force)
 
-    # ---- Grouping structures ----
-    # Keys include:
-    #   (bucket, min/max tuple, modes_key, payload tuple)
-    # where bucket is "global" vs "perlight" as you requested.
+    overridden: set[str] = entry_data.get(ATTR_OVERRIDDEN_LIGHTS) or set()
+
     turn_off_groups: dict[tuple, list[str]] = {}
     single_on_groups: dict[tuple, list[str]] = {}
     xy_bri_groups: dict[tuple, list[str]] = {}
     xy_ct_groups: dict[tuple, list[str]] = {}
 
-    # For logging per-light with computed values
-    per_light_values: dict[str, dict[str, Any]] = {}
-
-    def _bucket_for(light_id: str, settings: dict[str, Any]) -> str:
-        """'global' if no per-light overrides for any range keys we care about, else 'perlight'."""
+    def _bucket_for(_light_id: str, settings: dict[str, Any]) -> str:
         keys = (CONF_MIN_BRIGHTNESS, CONF_MAX_BRIGHTNESS, CONF_MIN_KELVIN, CONF_MAX_KELVIN)
         return "perlight" if any(k in settings for k in keys) else "global"
 
@@ -250,6 +247,10 @@ async def async_update_lights_for_entry(
         group_map.setdefault(key, []).append(light_id)
 
     for light_id in lights:
+        if light_id in overridden:
+            _LOGGER.debug("PL SKIP OVERRIDDEN | entry_id=%s light=%s", entry_id, light_id)
+            continue
+
         st = hass.states.get(light_id)
         if st is None or st.state != "on":
             continue
@@ -262,7 +263,6 @@ async def async_update_lights_for_entry(
         min_kelvin = float(this_light.get(CONF_MIN_KELVIN, global_min_kelvin))
         max_kelvin = float(this_light.get(CONF_MAX_KELVIN, global_max_kelvin))
 
-        # Compute desired values (per-light) because ranges can differ
         desired_bri: int | None = None
         desired_kelvin: int | None = None
 
@@ -283,71 +283,41 @@ async def async_update_lights_for_entry(
                 desired_kelvin = int(round(k))
 
         modes = _supported_modes(hass, light_id)
-        modes_key = tuple(sorted(modes))  # stable grouping key
+        modes_key = tuple(sorted(modes))
         xy_only = modes == {"xy"}
 
-        # If nothing to do, skip
         if desired_bri is None and desired_kelvin is None and transition <= 0:
             continue
 
-        # Turn-off path (batchable)
         if brightness_enabled and desired_bri is not None and desired_bri < 1:
-            key = (
-                bucket,
-                (min_brightness, max_brightness, min_kelvin, max_kelvin),
-                modes_key,
-                ("off", transition),
-            )
+            key = (bucket, (min_brightness, max_brightness, min_kelvin, max_kelvin), modes_key, ("off", transition))
             _add(turn_off_groups, key, light_id)
-            per_light_values[light_id] = {"action": "turn_off", "bri": None, "kelvin": None}
             continue
 
-        # Decide split vs single call
         needs_bri = desired_bri is not None
         needs_ct = desired_kelvin is not None
-
         split_xy = bool(transition > 0 and xy_only and needs_bri and needs_ct)
 
         if not split_xy:
-            # Single turn_on call (batchable)
             payload_key = ("on", desired_bri, desired_kelvin, transition)
-            key = (
-                bucket,
-                (min_brightness, max_brightness, min_kelvin, max_kelvin),
-                modes_key,
-                payload_key,
-            )
+            key = (bucket, (min_brightness, max_brightness, min_kelvin, max_kelvin), modes_key, payload_key)
             _add(single_on_groups, key, light_id)
-            per_light_values[light_id] = {"action": "turn_on", "bri": desired_bri, "kelvin": desired_kelvin}
         else:
-            # XY-only + transition + both bri & ct -> split calls
-            key_bri = (
-                bucket,
-                (min_brightness, max_brightness, min_kelvin, max_kelvin),
-                modes_key,
-                ("xy_bri", desired_bri, transition),
-            )
-            key_ct = (
-                bucket,
-                (min_brightness, max_brightness, min_kelvin, max_kelvin),
-                modes_key,
-                ("xy_ct", desired_kelvin, transition),
-            )
+            key_bri = (bucket, (min_brightness, max_brightness, min_kelvin, max_kelvin), modes_key, ("xy_bri", desired_bri, transition))
+            key_ct = (bucket, (min_brightness, max_brightness, min_kelvin, max_kelvin), modes_key, ("xy_ct", desired_kelvin, transition))
             _add(xy_bri_groups, key_bri, light_id)
             _add(xy_ct_groups, key_ct, light_id)
-            per_light_values[light_id] = {"action": "turn_on_split", "bri": desired_bri, "kelvin": desired_kelvin}
 
-    # Helper for batched calls (entity_id can be list)
     async def _call_light(service: str, entity_ids: list[str], data: dict[str, Any]) -> None:
         svc_data = {"entity_id": entity_ids, **data}
         await hass.services.async_call("light", service, svc_data, blocking=False)
 
-    # ---- Execute: non-XY groups first, XY-split last ----
-
-    # 1) Turn off (batch)
     for key, entity_ids in turn_off_groups.items():
-        _bucket, _ranges, _modes_key, (_tag, t) = key
-        # Log per light
+        (_bucket, _ranges, _modes_key, (_tag, _t)) = key
+        data: dict[str, Any] = {}
+        if transition > 0:
+            data["transition"] = transition
+
         for lid in entity_ids:
             _log_action(
                 hass,
@@ -356,18 +326,25 @@ async def async_update_lights_for_entry(
                 action="turn_off",
                 reason=reason,
                 transition=transition if transition > 0 else None,
-                logbook = True,
+                log_to_logbook=True,
             )
-        data: dict[str, Any] = {}
-        if transition > 0:
-            data["transition"] = transition
+
+        _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=None, kelvin=None, transition=transition)
         await _call_light("turn_off", entity_ids, data)
 
-    # 2) Single-call turn_on (batch), excluding split XY
     for key, entity_ids in single_on_groups.items():
-        _bucket, _ranges, _modes_key, (_tag, bri, kelvin, t) = key
+        (_bucket, _ranges, _modes_key, (_tag, bri, kelvin, _t)) = key
 
-        # Log per light
+        data: dict[str, Any] = {}
+        if bri is not None:
+            data["brightness_pct"] = int(bri)
+        if kelvin is not None:
+            data["color_temp_kelvin"] = int(kelvin)
+        if transition > 0:
+            data["transition"] = transition
+        if not data:
+            continue
+
         for lid in entity_ids:
             _log_action(
                 hass,
@@ -380,25 +357,13 @@ async def async_update_lights_for_entry(
                 transition=transition if transition > 0 else None,
             )
 
-        data: dict[str, Any] = {}
-        if bri is not None:
-            data["brightness_pct"] = int(bri)
-        if kelvin is not None:
-            data["color_temp_kelvin"] = int(kelvin)
-        if transition > 0:
-            data["transition"] = transition
-
-        # If we ended up with an empty payload (shouldn't happen), skip
-        if not data:
-            continue
-
+        _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=bri, kelvin=kelvin, transition=transition)
         await _call_light("turn_on", entity_ids, data)
 
-    # 3) XY-only split updates (batch), done last
     if xy_bri_groups:
-        # 3a) brightness step
         for key, entity_ids in xy_bri_groups.items():
-            _bucket, _ranges, _modes_key, (_tag, bri, t) = key
+            (_bucket, _ranges, _modes_key, (_tag, bri, _t)) = key
+            data = {"brightness_pct": int(bri), "transition": transition}
 
             for lid in entity_ids:
                 _log_action(
@@ -411,16 +376,15 @@ async def async_update_lights_for_entry(
                     transition=transition,
                 )
 
-            data = {"brightness_pct": int(bri), "transition": transition}
+            _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=bri, kelvin=None, transition=transition)
             await _call_light("turn_on", entity_ids, data)
 
-        # Wait full transition BEFORE issuing CT call
         if transition > 0:
             await asyncio.sleep(transition)
 
-        # 3b) color temp step (CT only)
         for key, entity_ids in xy_ct_groups.items():
-            _bucket, _ranges, _modes_key, (_tag, kelvin, t) = key
+            (_bucket, _ranges, _modes_key, (_tag, kelvin, _t)) = key
+            data = {"color_temp_kelvin": int(kelvin), "transition": transition}
 
             for lid in entity_ids:
                 _log_action(
@@ -433,7 +397,7 @@ async def async_update_lights_for_entry(
                     transition=transition,
                 )
 
-            data = {"color_temp_kelvin": int(kelvin), "transition": transition}
+            _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=None, kelvin=kelvin, transition=transition)
             await _call_light("turn_on", entity_ids, data)
 
     entry_data[ATTR_LAST_LIGHT_UPDATE] = now

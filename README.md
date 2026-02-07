@@ -87,7 +87,7 @@ Lights that are on are continuously updated based on:
 - Update interval  
 - “Transition on turn-on” switch  
 
-Lights that are **off are never turned on** by this integration.
+Lights that are **off are never turned on** by this integration. If you adjust the light's brightness or temperature outside of this integration it will stop updating the light until the light is synced with the button, or the light is toggled off -> on. 
 
 ---
 
@@ -214,8 +214,8 @@ Shaping parameter 2:
 
 <img src='assets/images/curves_param_2.png' width=800>
 
-# Planned Features
+<!-- # Planned Features
 
-- Manual override “cooldown period”  
+- Manual override “cooldown period”   -->
 
 ---
