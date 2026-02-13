@@ -257,12 +257,20 @@ async def async_update_lights_for_entry(
         if st is None or st.state != "on":
             continue
 
-        this_light = per_light_settings.get(light_id, {}) or {}
-
-        min_brightness = float(this_light.get(CONF_MIN_BRIGHTNESS, global_min_brightness))
-        max_brightness = float(this_light.get(CONF_MAX_BRIGHTNESS, global_max_brightness))
-        min_kelvin = float(this_light.get(CONF_MIN_KELVIN, global_min_kelvin))
-        max_kelvin = float(this_light.get(CONF_MAX_KELVIN, global_max_kelvin))
+        this_light = per_light_settings.get(light_id)
+        
+        if this_light:
+            # This light has custom per-light overrides
+            min_brightness = float(this_light.get(CONF_MIN_BRIGHTNESS, global_min_brightness))
+            max_brightness = float(this_light.get(CONF_MAX_BRIGHTNESS, global_max_brightness))
+            min_kelvin = float(this_light.get(CONF_MIN_KELVIN, global_min_kelvin))
+            max_kelvin = float(this_light.get(CONF_MAX_KELVIN, global_max_kelvin))
+        else:
+            # Fast path: use global defaults directly, no dict lookups
+            min_brightness = global_min_brightness
+            max_brightness = global_max_brightness
+            min_kelvin = global_min_kelvin
+            max_kelvin = global_max_kelvin
 
         desired_bri: int | None = None
         desired_kelvin: int | None = None
