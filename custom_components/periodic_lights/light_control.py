@@ -104,12 +104,11 @@ def _reason(entry_data: dict[str, Any], *, force: bool) -> str:
     return "periodic_update"
 
 
-def _supported_modes(hass: HomeAssistant, entity_id: str) -> set[str]:
-    """Return supported_color_modes as a lowercase set. Empty set if unknown."""
-    st = hass.states.get(entity_id)
-    if st is None:
+def _supported_modes_from_state(state) -> set[str]:
+    """Return supported_color_modes as a lowercase set from a state object."""
+    if state is None:
         return set()
-    modes = st.attributes.get("supported_color_modes")
+    modes = state.attributes.get("supported_color_modes")
     if not modes:
         return set()
     return {str(m).lower() for m in modes}
@@ -234,6 +233,16 @@ async def async_update_lights_for_entry(
 
     overridden: set[str] = entry_data.get(ATTR_OVERRIDDEN_LIGHTS) or set()
 
+    # Cache all light states in one pass
+    light_states: dict[str, Any] = {}
+    modes_cache: dict[str, set[str]] = {}
+    
+    for light_id in lights:
+        state = hass.states.get(light_id)
+        light_states[light_id] = state
+        if state is not None:
+            modes_cache[light_id] = _supported_modes_from_state(state)
+    
     # Collect all light data first
     lights_to_turn_off: list[tuple[str, float]] = []  # (light_id, transition)
     lights_to_update: list[tuple[str, int | None, int | None, bool]] = []  # (light_id, bri, kelvin, is_xy_only)
@@ -243,7 +252,8 @@ async def async_update_lights_for_entry(
             _LOGGER.debug("PL SKIP OVERRIDDEN | entry_id=%s light=%s", entry_id, light_id)
             continue
 
-        st = hass.states.get(light_id)
+        # Use cached state instead of hass.states.get()
+        st = light_states.get(light_id)
         if st is None or st.state != "on":
             continue
 
@@ -281,8 +291,8 @@ async def async_update_lights_for_entry(
             lights_to_turn_off.append((light_id, transition))
             continue
 
-        # Check if this is an XY-only light
-        modes = _supported_modes(hass, light_id)
+        # Use cached modes instead of calling _supported_modes()
+        modes = modes_cache.get(light_id, set())
         is_xy_only = modes == {"xy"}
         
         lights_to_update.append((light_id, desired_bri, desired_kelvin, is_xy_only))
