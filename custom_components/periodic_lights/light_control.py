@@ -252,7 +252,6 @@ async def async_update_lights_for_entry(
             _LOGGER.debug("PL SKIP OVERRIDDEN | entry_id=%s light=%s", entry_id, light_id)
             continue
 
-        # Use cached state instead of hass.states.get()
         st = light_states.get(light_id)
         if st is None or st.state != "on":
             continue
@@ -260,13 +259,11 @@ async def async_update_lights_for_entry(
         this_light = per_light_settings.get(light_id)
         
         if this_light:
-            # This light has custom per-light overrides
             min_brightness = float(this_light.get(CONF_MIN_BRIGHTNESS, global_min_brightness))
             max_brightness = float(this_light.get(CONF_MAX_BRIGHTNESS, global_max_brightness))
             min_kelvin = float(this_light.get(CONF_MIN_KELVIN, global_min_kelvin))
             max_kelvin = float(this_light.get(CONF_MAX_KELVIN, global_max_kelvin))
         else:
-            # Fast path: use global defaults directly, no dict lookups
             min_brightness = global_min_brightness
             max_brightness = global_max_brightness
             min_kelvin = global_min_kelvin
@@ -294,24 +291,20 @@ async def async_update_lights_for_entry(
         if desired_bri is None and desired_kelvin is None and transition <= 0:
             continue
 
-        # Check if we need to turn off (brightness < 1%)
         if brightness_enabled and desired_bri is not None and desired_bri < 1:
             lights_to_turn_off.append((light_id, transition))
             continue
 
-        # Use cached modes instead of calling _supported_modes()
         modes = modes_cache.get(light_id, set())
         is_xy_only = modes == {"xy"}
         
         lights_to_update.append((light_id, desired_bri, desired_kelvin, is_xy_only))
 
-    # Now batch by actual service call parameters
     async def _call_light(service: str, entity_ids: list[str], data: dict[str, Any]) -> None:
         svc_data = {"entity_id": entity_ids, **data}
         await hass.services.async_call("light", service, svc_data, blocking=False)
 
-    # ---- Handle turn_off commands ----
-    # Group by transition time only
+    # Handle turn_off commands
     turn_off_by_transition: dict[float, list[str]] = {}
     for light_id, trans in lights_to_turn_off:
         turn_off_by_transition.setdefault(trans, []).append(light_id)
@@ -335,8 +328,7 @@ async def async_update_lights_for_entry(
         _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=None, kelvin=None, transition=trans)
         await _call_light("turn_off", entity_ids, data)
 
-    # ---- Handle turn_on commands ----
-    # Separate XY-only lights from regular lights
+    # Handle turn_on commands
     xy_only_lights: list[tuple[str, int | None, int | None]] = []
     regular_lights: list[tuple[str, int | None, int | None]] = []
     
@@ -386,6 +378,8 @@ async def async_update_lights_for_entry(
             if bri is not None:
                 bri_groups.setdefault(bri, []).append(light_id)
         
+        # Build all brightness update tasks
+        brightness_tasks = []
         for bri, entity_ids in bri_groups.items():
             data = {"brightness_pct": int(bri), "transition": transition}
 
@@ -401,7 +395,11 @@ async def async_update_lights_for_entry(
                 )
 
             _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=bri, kelvin=None, transition=transition)
-            await _call_light("turn_on", entity_ids, data)
+            brightness_tasks.append(_call_light("turn_on", entity_ids, data))
+
+        # Execute all brightness updates concurrently
+        if brightness_tasks:
+            await asyncio.gather(*brightness_tasks)
 
         # Wait for brightness transition to complete
         if transition > 0:
@@ -413,6 +411,8 @@ async def async_update_lights_for_entry(
             if kelvin is not None:
                 kelvin_groups.setdefault(kelvin, []).append(light_id)
         
+        # Build all color temp update tasks
+        color_temp_tasks = []
         for kelvin, entity_ids in kelvin_groups.items():
             data = {"color_temp_kelvin": int(kelvin), "transition": transition}
 
@@ -428,6 +428,10 @@ async def async_update_lights_for_entry(
                 )
 
             _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=None, kelvin=kelvin, transition=transition)
-            await _call_light("turn_on", entity_ids, data)
+            color_temp_tasks.append(_call_light("turn_on", entity_ids, data))
+
+        # Execute all color temp updates concurrently
+        if color_temp_tasks:
+            await asyncio.gather(*color_temp_tasks)
 
     entry_data[ATTR_LAST_LIGHT_UPDATE] = now
