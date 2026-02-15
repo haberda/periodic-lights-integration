@@ -12,6 +12,7 @@ CONF_USE_HIDDEN = "use_hidden"
 # Config stored in entry.data
 CONF_UPDATE_INTERVAL = "update_interval"  # seconds
 CONF_TRANSITION = "transition"            # seconds
+CONF_DEBOUNCE_DELAY = "debounce_delay"    # seconds
 
 # Dispatcher signal used to notify sensors they should recalculate immediately
 SIGNAL_UPDATE_SENSORS = "periodic_lights_update_sensors"
@@ -23,10 +24,13 @@ SIGNAL_REFRESH_ENTITIES = "periodic_lights_refresh_entities"
 ATTR_ENABLED = "enabled"
 ATTR_BRIGHTNESS_ENABLED = "brightness_enabled"
 ATTR_COLOR_TEMP_ENABLED = "color_temp_enabled"
+ATTR_SPLIT_SERVICE_CALLS = "split_service_calls"
 ATTR_BEDTIME = "bedtime"
 ATTR_LIGHT_SETTINGS = "light_settings"
 ATTR_LAST_LIGHT_UPDATE = "last_light_update"
 ATTR_TRANSITION_ON_TURN_ON = "transition_on_turn_on"
+ATTR_LIGHT_ON_LISTENER = "light_on_listener"  # Listener unsubscribe function
+ATTR_RESUBSCRIBE_FN = "resubscribe_fn"  # Function to re-enable listener after our updates
 
 #  Fixed-minimum-time controls
 ATTR_USE_FIXED_MIN_TIME = "use_fixed_min_time"   # bool
@@ -45,6 +49,7 @@ DEFAULT_TRANSITION = 5              # seconds
 DEFAULT_SHAPING_PARAM = 1.0         # Gamma=1 => baseline half-sine
 DEFAULT_SHAPING_FUNCTION = "gamma_sine"
 DEFAULT_FIXED_MIN_TIME = "00:00"
+DEFAULT_DEBOUNCE_DELAY = 0.3        # seconds - small delay to prevent CPU thrashing on rapid state changes
 
 # Add "button"
 PLATFORMS = ["switch", "sensor", "number", "select", "time", "button"]

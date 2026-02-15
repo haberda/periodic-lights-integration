@@ -23,12 +23,14 @@ from .const import (
     CONF_USE_HIDDEN,
     CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
+    CONF_DEBOUNCE_DELAY,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_TRANSITION,
+    DEFAULT_DEBOUNCE_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -197,6 +199,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             use_hidden: bool = bool(user_input.get(CONF_USE_HIDDEN, False))
             update_interval = int(user_input[CONF_UPDATE_INTERVAL])
             transition = int(user_input[CONF_TRANSITION])
+            debounce_delay = float(user_input.get(CONF_DEBOUNCE_DELAY, DEFAULT_DEBOUNCE_DELAY))
 
             combined_lights, manual_filtered, _ = await _compute_combined_lights(
                 self.hass,
@@ -220,6 +223,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "interval_out_of_range"
             elif transition < 0 or transition > 600:
                 errors["base"] = "transition_out_of_range"
+            elif debounce_delay < 0 or debounce_delay > 5:
+                errors["base"] = "debounce_out_of_range"
             else:
                 await self.async_set_unique_id(name)
                 self._abort_if_unique_id_configured()
@@ -238,6 +243,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_MAX_KELVIN: max_kelvin,
                         CONF_UPDATE_INTERVAL: update_interval,
                         CONF_TRANSITION: transition,
+                        CONF_DEBOUNCE_DELAY: debounce_delay,
                     },
                 )
 
@@ -266,6 +272,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(CONF_TRANSITION, default=DEFAULT_TRANSITION): selector.selector(
                     {"number": {"min": 0, "max": 60, "step": 1, "mode": "box", "unit_of_measurement": "s"}}
+                ),
+                vol.Required(CONF_DEBOUNCE_DELAY, default=DEFAULT_DEBOUNCE_DELAY): selector.selector(
+                    {"number": {"min": 0, "max": 5, "step": 0.1, "mode": "box", "unit_of_measurement": "s"}}
                 ),
             }
         )

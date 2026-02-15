@@ -19,6 +19,7 @@ from .const import (
     ATTR_ENABLED,
     ATTR_BRIGHTNESS_ENABLED,
     ATTR_COLOR_TEMP_ENABLED,
+    ATTR_SPLIT_SERVICE_CALLS,
     ATTR_BEDTIME,
     ATTR_TRANSITION_ON_TURN_ON,
     ATTR_USE_FIXED_MIN_TIME,
@@ -46,6 +47,7 @@ async def async_setup_entry(
         PeriodicLightsMasterSwitch(hass, entry.entry_id, name, lights),
         PeriodicLightsBrightnessSwitch(hass, entry.entry_id, name),
         PeriodicLightsColorTempSwitch(hass, entry.entry_id, name),
+        PeriodicLightsSplitServiceCallsSwitch(hass, entry.entry_id, name),
         PeriodicLightsBedtimeSwitch(hass, entry.entry_id, name),
         PeriodicLightsTransitionOnTurnOnSwitch(hass, entry.entry_id, name),
         PeriodicLightsFixedMinSwitch(hass, entry.entry_id, name),
@@ -275,6 +277,46 @@ class PeriodicLightsColorTempSwitch(_BasePeriodicSwitch):
         self.async_write_ha_state()
         async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
+
+
+class PeriodicLightsSplitServiceCallsSwitch(_BasePeriodicSwitch):
+    """When ON, Periodic Lights will always split brightness and color updates into two service calls.
+
+    This is a compatibility mode for lights that struggle when both brightness and color temperature
+    are set together (especially with transitions). Default: OFF.
+    """
+
+    def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
+        super().__init__(hass, entry_id, setup_name)
+        self._attr_name = f"{setup_name} Split brightness/color updates"
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_split_service_calls"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        old_state = await self.async_get_last_state()
+        # Default OFF
+        self._is_on = old_state.state == "on" if old_state is not None else False
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if data is not None:
+            data[ATTR_SPLIT_SERVICE_CALLS] = self._is_on
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._is_on = True
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if data is not None:
+            data[ATTR_SPLIT_SERVICE_CALLS] = True
+        self.async_write_ha_state()
+        self.hass.async_create_task(async_update_lights_for_entry(self.hass, self._entry_id, force=True))
+        async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._is_on = False
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if data is not None:
+            data[ATTR_SPLIT_SERVICE_CALLS] = False
+        self.async_write_ha_state()
+        self.hass.async_create_task(async_update_lights_for_entry(self.hass, self._entry_id, force=True))
+        async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
 class PeriodicLightsBedtimeSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
