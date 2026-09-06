@@ -40,6 +40,8 @@ from .const import (
 )
 from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
 
+from .curve_model import curve_at
+
 _LOGGER = logging.getLogger(__name__)
 
 # Must match __init__.py runtime keys
@@ -48,51 +50,10 @@ ATTR_EXPECTED_CHANGES = "pl_expected_changes"
 ATTR_LAST_APPLIED = "pl_last_applied"
 
 
-def _parse_fixed_min_seconds(raw: Any) -> float:
-    """Parse ATTR_FIXED_MIN_TIME into seconds since midnight."""
-    if raw is None:
-        return 0.0
-
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        pass
-
-    if isinstance(raw, str):
-        parts = raw.split(":")
-        if len(parts) >= 2:
-            try:
-                hour = int(parts[0])
-                minute = int(parts[1])
-                second = int(parts[2]) if len(parts) > 2 else 0
-                return float(hour * 3600 + minute * 60 + second)
-            except ValueError:
-                return 0.0
-
-    return 0.0
-
-
-def _compute_phase_with_optional_override(hass: HomeAssistant, entry_data: dict[str, Any]) -> float:
-    """Return phase in [0,1], using fixed-min override if enabled."""
-    phase, _cycle = daily_pct(hass)
-
-    use_fixed = bool(entry_data.get(ATTR_USE_FIXED_MIN_TIME, False))
-    if not use_fixed:
-        return phase
-
-    fixed_raw = entry_data.get(ATTR_FIXED_MIN_TIME, 0.0)
-    fixed_seconds = _parse_fixed_min_seconds(fixed_raw)
-
-    now_local = dt_util.as_local(dt_util.utcnow())
-    today = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    min_dt = today + timedelta(seconds=fixed_seconds)
-
-    seconds_from_min = (now_local - min_dt).total_seconds()
-    phase_override = (seconds_from_min / (24 * 3600.0)) % 1.0
-    if phase_override < 0.0:
-        phase_override += 1.0
-
-    return phase_override
+def _compute_phase_with_optional_override(hass, entry_data):
+    _, cycle = daily_pct(hass)
+    point = curve_at(entry_data, dt_util.as_local(dt_util.utcnow()), cycle)
+    return point.phase
 
 
 def _reason(entry_data: dict[str, Any], *, force: bool) -> str:

@@ -219,3 +219,28 @@ Shaping parameter 2:
 - Manual override “cooldown period”   -->
 
 ---
+
+## Daily curve preview
+
+Each setup provides a **Daily curve preview** image entity. In a dashboard, add a
+**Picture Entity** card and select this entity, or adapt this example to its actual ID:
+
+```yaml
+type: picture-entity
+entity: image.living_room_daily_curve_preview
+show_name: true
+show_state: false
+```
+
+The PNG shows the configured setup-wide brightness and temperature schedule for the
+local calendar day, with a current-time line and sampled minimum/maximum markers.
+Settings changes invalidate the image immediately; the current-time marker refreshes
+every five minutes. Rendering is cached and runs outside the event loop.
+Bedtime and disabled-control annotations explain why live behavior may differ.
+Per-light ranges, manual overrides, and light on/off state are not forecasts in this
+setup-wide graph. Daylight-saving days contain 23 or 25 actual hours where applicable.
+The image has no hover tooltips and requires no custom dashboard resource.
+
+Validation: run `python -m unittest discover -s tests -p "test_runtime*.py"`.
+These unit tests mock the Home Assistant boundary; a live Home Assistant smoke test
+is still recommended before deployment.
