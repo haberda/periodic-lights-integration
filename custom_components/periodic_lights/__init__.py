@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pprint import pformat
 from typing import Any
 
@@ -10,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -468,7 +469,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, effective_lights, _handle_light_state_change
         )
 
+    # The entry owns light scheduling; diagnostic sensors can be disabled safely.
+    cancel_update_timer = None
+
+    async def _periodic_update(_now) -> None:
+        await async_update_lights_for_entry(hass, entry.entry_id)
+
+    @callback
+    def _stop_update_timer() -> None:
+        nonlocal cancel_update_timer
+        if cancel_update_timer is not None:
+            cancel_update_timer()
+            cancel_update_timer = None
+
+    @callback
+    def _reschedule_light_updates() -> None:
+        nonlocal cancel_update_timer
+        _stop_update_timer()
+        interval = float(entry_state.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
+        cancel_update_timer = async_track_time_interval(
+            hass, _periodic_update, timedelta(seconds=interval)
+        )
+
+    entry_state["pl_reschedule_light_updates"] = _reschedule_light_updates
+    entry_state["pl_stop_light_updates"] = _stop_update_timer
+    entry.async_on_unload(_stop_update_timer)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _reschedule_light_updates()
+
 
     # ---- Post-start refresh: area may be incomplete during early startup ----
     async def _recompute_effective_lights() -> list[str]:
@@ -551,6 +580,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_state = hass.data[DOMAIN].get(entry.entry_id)
     if entry_state:
         cancel_pending_light_updates(entry_state)
+        entry_state["pl_stop_light_updates"]()
         # Unsubscribe global on/off listener
         unsub = entry_state.get(ATTR_LIGHT_ON_LISTENER)
         if unsub is not None:

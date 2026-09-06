@@ -121,6 +121,10 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
             data[self._key] = value
+            if self._key == CONF_UPDATE_INTERVAL:
+                reschedule = data.get("pl_reschedule_light_updates")
+                if reschedule is not None:
+                    reschedule()
 
         self._attr_native_value = value
         self.async_write_ha_state()
@@ -130,6 +134,10 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
             data[self._key] = value
+            if self._key == CONF_UPDATE_INTERVAL:
+                reschedule = data.get("pl_reschedule_light_updates")
+                if reschedule is not None:
+                    reschedule()
 
         self._attr_native_value = value
         self.async_write_ha_state()

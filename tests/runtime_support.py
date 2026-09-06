@@ -24,18 +24,28 @@ def load_runtime():
     module('homeassistant')
     module('homeassistant.components')
     module('homeassistant.components.logbook', async_log_entry=Mock())
+    class Entity:
+        def async_write_ha_state(self):
+            pass
+    class RestoreEntity:
+        async def async_added_to_hass(self):
+            pass
+    module('homeassistant.components.number', NumberEntity=Entity, NumberMode=SimpleNamespace(BOX='box'))
+    module('homeassistant.helpers.entity', DeviceInfo=dict)
+    module('homeassistant.helpers.entity_platform', AddEntitiesCallback=object)
+    module('homeassistant.helpers.restore_state', RestoreEntity=RestoreEntity)
     module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object, callback=lambda fn: fn)
     module('homeassistant.config_entries', ConfigEntry=object)
     module('homeassistant.const', EVENT_HOMEASSISTANT_STARTED='started')
     module('homeassistant.helpers')
     module('homeassistant.helpers.dispatcher', async_dispatcher_send=Mock())
-    module('homeassistant.helpers.event', async_call_later=Mock(), async_track_state_change_event=Mock())
+    module('homeassistant.helpers.event', async_call_later=Mock(), async_track_state_change_event=Mock(), async_track_time_interval=Mock())
     module('homeassistant.helpers.typing', ConfigType=dict)
     module('homeassistant.util')
     module('homeassistant.util.dt', utcnow=lambda: datetime.now(timezone.utc), as_local=lambda dt: dt)
     package = module('review_periodic_lights', __path__=[str(ROOT)])
     with patch.dict(sys.modules, modules):
-        for name in ('const', 'curve_math', 'solar_curve', 'light_control'):
+        for name in ('const', 'curve_math', 'solar_curve', 'light_control', 'number'):
             spec = importlib.util.spec_from_file_location(f'{package.__name__}.{name}', ROOT / f'{name}.py')
             loaded = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = loaded

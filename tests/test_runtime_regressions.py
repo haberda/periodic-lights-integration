@@ -130,3 +130,39 @@ class OverrideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.listeners), 1)
         self.change(self.state(50), self.state(60, user='user'))
         self.assertIn('light.test', self.data['overridden_lights'])
+
+
+class SchedulingTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp = OverrideTests.asyncSetUp
+    state = OverrideTests.state
+
+    async def test_timer_runs_without_sensor_entities(self):
+        timer = self.integration.async_track_time_interval
+        self.assertEqual(timer.call_args.args[2].total_seconds(), 300)
+        update = AsyncMock()
+        self.integration.async_update_lights_for_entry = update
+        await timer.call_args.args[1](None)
+        update.assert_awaited_once_with(self.hass, 'entry')
+
+    async def test_number_changes_reschedule_exact_interval(self):
+        number = self.runtime.package.number.PeriodicLightsUpdateIntervalNumber(self.hass, 'entry', 'Test')
+        timer = self.integration.async_track_time_interval
+        for interval in (10, 90):
+            old_cancel = timer.return_value
+            old_cancel.reset_mock()
+            await number.async_set_native_value(interval)
+            old_cancel.assert_called_once_with()
+            self.assertEqual(timer.call_args.args[2].total_seconds(), interval)
+
+    async def test_restored_interval_reschedules_timer(self):
+        number = self.runtime.package.number.PeriodicLightsUpdateIntervalNumber(self.hass, 'entry', 'Test')
+        number.async_get_last_state = AsyncMock(return_value=SimpleNamespace(state='90'))
+        await number.async_added_to_hass()
+        self.assertEqual(self.integration.async_track_time_interval.call_args.args[2].total_seconds(), 90)
+
+    async def test_unload_cancels_timer(self):
+        cancel = self.integration.async_track_time_interval.return_value
+        self.hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+        await self.integration.async_unload_entry(self.hass, self.entry)
+        cancel.assert_called_once_with()
+        self.assertNotIn('periodic_lights', self.hass.data)

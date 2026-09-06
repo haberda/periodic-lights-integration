@@ -37,7 +37,6 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
 )
 from .solar_curve import daily_pct, map_pct_to_range, SolarCycle, apply_shaping
-from .light_control import async_update_lights_for_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -185,12 +184,9 @@ class _BasePeriodicSensor(SensorEntity):
             self._unsub_dispatcher = None
 
     async def _handle_timer(self, now) -> None:
-        """Timer callback to update sensor value (and possibly lights)."""
+        """Timer callback to update the diagnostic sensor value."""
         self._safe_recalculate()
         self.async_write_ha_state()
-
-        if self._should_update_lights():
-            await async_update_lights_for_entry(self.hass, self._entry_id)
 
     def _handle_external_update(self) -> None:
         """Dispatcher callback; schedule recalculation on the event loop.
@@ -230,10 +226,6 @@ class _BasePeriodicSensor(SensorEntity):
         """Perform the actual curve calculation and set native_value."""
         raise NotImplementedError
 
-    def _should_update_lights(self) -> bool:
-        """Whether this sensor should trigger light updates after recalculation."""
-        return False  # overridden by brightness sensor
-
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Additional info: phase, shaped pct, solar timings."""
@@ -272,10 +264,6 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
         master = data.get(ATTR_ENABLED, True)
         brightness_enabled = data.get(ATTR_BRIGHTNESS_ENABLED, True)
         return master and brightness_enabled
-
-    def _should_update_lights(self) -> bool:
-        """Brightness sensor drives actual light updates."""
-        return True
 
     def _recalculate(self) -> None:
         entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})

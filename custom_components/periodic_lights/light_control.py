@@ -17,7 +17,6 @@ from .const import (
     CONF_MAX_BRIGHTNESS,
     CONF_MIN_KELVIN,
     CONF_MAX_KELVIN,
-    CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
     ATTR_ENABLED,
     ATTR_BRIGHTNESS_ENABLED,
@@ -34,7 +33,6 @@ from .const import (
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
     DEFAULT_MAX_KELVIN,
-    DEFAULT_UPDATE_INTERVAL,
     DEFAULT_TRANSITION,
     DEFAULT_SHAPING_PARAM,
     DEFAULT_SHAPING_FUNCTION,
@@ -200,6 +198,9 @@ async def async_update_lights_for_entry(
     if entry_data is None:
         return
     tasks = entry_data.setdefault("pl_update_tasks", set())
+    # A long split transition must finish before another periodic update starts.
+    if tasks and not force:
+        return
     task = asyncio.current_task()
     tasks.add(task)
     try:
@@ -237,12 +238,7 @@ async def _async_update_lights_for_entry(
     if not lights:
         return
 
-    interval = float(entry_data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
     now = dt_util.utcnow()
-    last_update = entry_data.get(ATTR_LAST_LIGHT_UPDATE)
-    if not force and last_update is not None:
-        if (now - last_update).total_seconds() < interval:
-            return
 
     brightness_enabled = bool(entry_data.get(ATTR_BRIGHTNESS_ENABLED, True))
     color_temp_enabled = bool(entry_data.get(ATTR_COLOR_TEMP_ENABLED, True))
