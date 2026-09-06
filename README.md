@@ -219,3 +219,18 @@ Shaping parameter 2:
 - Manual override “cooldown period”   -->
 
 ---
+
+## Per-light adaptation diagnostics
+
+Each configured light has an **Adaptation** diagnostic sensor on the setup's device page.
+Its state explains whether the light is adapting, off, unavailable, manually overridden,
+or blocked by the master or control switches. If several conditions apply, unavailable
+and off take precedence, followed by master disable, controls disable, and manual override.
+The more-info attributes include rounded per-light targets, enabled controls, and the last
+command-sent timestamp. A sent command is not confirmation that a bulb applied it.
+Targets describe the configured output even while a light is off or overridden.
+No per-light resume button or pause controls are added.
+
+Validation: run `python -m unittest discover -s tests -p "test_runtime*.py"`.
+These unit tests mock the Home Assistant boundary; a live Home Assistant smoke test
+is still recommended before deployment.
