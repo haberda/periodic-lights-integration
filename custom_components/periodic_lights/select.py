@@ -30,12 +30,18 @@ ID_TO_LABEL = {id_: label for id_, label in _SHAPING_OPTIONS}
 LABEL_TO_ID = {label: id_ for id_, label in _SHAPING_OPTIONS}
 
 
+from .temperature_entities import TemperatureCurveSelect
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up select entities for a config entry."""
+    async_add_entities([
+        TemperatureCurveSelect(hass, entry.entry_id, entry.title, 'temperature_shaping_function', 'Temperature Shaping Function'),
+    ])
     setup_name = entry.data.get(CONF_NAME, entry.title)
     entity = PeriodicLightsShapingFunctionSelect(hass, entry.entry_id, setup_name)
     async_add_entities([entity])

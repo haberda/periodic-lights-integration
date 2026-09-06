@@ -219,3 +219,25 @@ Shaping parameter 2:
 - Manual override “cooldown period”   -->
 
 ---
+
+## Separate temperature curve
+
+The **Use separate temperature curve** switch defaults off. With it off, the existing
+shaping and timing controls continue to govern both brightness and temperature.
+Turn it on to use the new **Temperature Shaping Function**, **Temperature Shaping
+Parameter**, **Temperature Use Fixed Minimum Time**, and **Temperature Fixed Minimum
+Time** controls for temperature only. The original controls then govern brightness.
+On first enable, temperature settings copy the shared curve unless you have already
+edited a temperature control. Later toggles retain your temperature settings.
+The controls stay visible while linked; their attributes show whether they apply.
+All five controls restore across restarts. Bedtime still uses the configured minimums,
+and global and per-light brightness/Kelvin ranges continue to set output limits.
+Place the existing controls and temperature controls in separate Entities cards to
+make a Brightness Curve / Temperature Curve dashboard layout.
+
+This branch is independent of the daily-preview feature. The preview branch understands
+these temperature settings and plots them separately when both features are present.
+
+Validation: run `python -m unittest discover -s tests -p "test_runtime*.py"`.
+These unit tests mock the Home Assistant boundary; a live Home Assistant smoke test
+is still recommended before deployment.

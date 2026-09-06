@@ -40,6 +40,8 @@ from .const import (
 )
 from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
 
+from .temperature_curve import temperature_curve_settings
+
 _LOGGER = logging.getLogger(__name__)
 
 # Must match __init__.py runtime keys
@@ -256,6 +258,13 @@ async def _async_update_lights_for_entry(
 
     phase = _compute_phase_with_optional_override(hass, entry_data)
     pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
+    temperature_settings = temperature_curve_settings(entry_data)
+    temperature_phase = _compute_phase_with_optional_override(hass, temperature_settings)
+    temperature_shaped = apply_shaping(
+        temperature_phase,
+        temperature_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
+        temperature_settings.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM),
+    )
 
     reason = _reason(entry_data, force=force)
 
@@ -306,7 +315,7 @@ async def _async_update_lights_for_entry(
             if bedtime:
                 k = min_kelvin
             else:
-                k = map_pct_to_range(pct_shaped, min_kelvin, max_kelvin)
+                k = map_pct_to_range(temperature_shaped, min_kelvin, max_kelvin)
             if k > 0:
                 desired_kelvin = int(round(k))
 
