@@ -107,8 +107,10 @@ async def async_get_lights_in_area(
         if not include_hidden and entity.hidden_by is not None:
             continue
 
-        if entity.area_id == area_id:
-            lights.append(entity.entity_id)
+        # An explicit entity area overrides its device's area.
+        if entity.area_id is not None:
+            if entity.area_id == area_id:
+                lights.append(entity.entity_id)
             continue
 
         if entity.device_id:

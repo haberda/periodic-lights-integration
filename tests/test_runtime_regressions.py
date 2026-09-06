@@ -166,3 +166,29 @@ class SchedulingTests(unittest.IsolatedAsyncioTestCase):
         await self.integration.async_unload_entry(self.hass, self.entry)
         cancel.assert_called_once_with()
         self.assertNotIn('periodic_lights', self.hass.data)
+
+
+class AreaSelectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_entity_area_overrides_device_area(self):
+        runtime = load_runtime()
+        flow = runtime.package.config_flow
+        entities = {
+            name: SimpleNamespace(entity_id=name, domain='light', area_id=area,
+                                  device_id='device', hidden_by=hidden)
+            for name, area, hidden in (
+                ('light.inherited', None, None),
+                ('light.explicit', 'kitchen', None),
+                ('light.other_room', 'bedroom', None),
+                ('light.hidden', None, 'user'),
+            )
+        }
+        flow.er.async_get.return_value = SimpleNamespace(entities=entities)
+        flow.dr.async_get.return_value = SimpleNamespace(devices={
+            'device': SimpleNamespace(area_id='kitchen'),
+        })
+        self.assertEqual(await flow.async_get_lights_in_area(None, 'kitchen'),
+                         ['light.explicit', 'light.inherited'])
+        self.assertEqual(await flow.async_get_lights_in_area(None, 'bedroom'),
+                         ['light.other_room'])
+        self.assertEqual(await flow.async_get_lights_in_area(None, 'kitchen', include_hidden=True),
+                         ['light.explicit', 'light.hidden', 'light.inherited'])
