@@ -179,7 +179,29 @@ def _record_expected_change(
         }
 
 
+def cancel_pending_light_updates(entry_data: dict[str, Any]) -> None:
+    """Cancel entry-owned updates, including a delayed split color step."""
+    for task in tuple(entry_data.get("pl_update_tasks", ())):
+        task.cancel()
+
+
 async def async_update_lights_for_entry(
+    hass: HomeAssistant, entry_id: str, *, force: bool = False,
+) -> None:
+    """Track in-flight updates so disabling or unloading can cancel them."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if entry_data is None:
+        return
+    tasks = entry_data.setdefault("pl_update_tasks", set())
+    task = asyncio.current_task()
+    tasks.add(task)
+    try:
+        await _async_update_lights_for_entry(hass, entry_id, force=force)
+    finally:
+        tasks.discard(task)
+
+
+async def _async_update_lights_for_entry(
     hass: HomeAssistant,
     entry_id: str,
     *,
@@ -294,7 +316,26 @@ async def async_update_lights_for_entry(
         lights_to_update.append((light_id, desired_bri, desired_kelvin))
 
     async def _call_light(service: str, entity_ids: list[str], data: dict[str, Any]) -> None:
-        svc_data = {"entity_id": entity_ids, **data}
+        # State may change while a split update waits for its first transition.
+        current = hass.data.get(DOMAIN, {}).get(entry_id)
+        if current is not entry_data or not current.get(ATTR_ENABLED, True):
+            return
+        if "color_temp_kelvin" in data and not current.get(ATTR_COLOR_TEMP_ENABLED, True):
+            data = {key: value for key, value in data.items() if key != "color_temp_kelvin"}
+        if "brightness_pct" in data and not current.get(ATTR_BRIGHTNESS_ENABLED, True):
+            data = {key: value for key, value in data.items() if key != "brightness_pct"}
+        if service == "turn_on" and not (data.keys() & {"brightness_pct", "color_temp_kelvin"}):
+            return
+        eligible = [
+            lid for lid in entity_ids
+            if lid in current.get(CONF_LIGHTS, [])
+            and lid not in current.get(ATTR_OVERRIDDEN_LIGHTS, set())
+            and (state := hass.states.get(lid)) is not None
+            and state.state == "on"
+        ]
+        if not eligible:
+            return
+        svc_data = {"entity_id": eligible, **data}
         await hass.services.async_call("light", service, svc_data, blocking=False)
 
     def _mute_override_listeners(entity_ids: list[str], *, delay_s: float) -> None:

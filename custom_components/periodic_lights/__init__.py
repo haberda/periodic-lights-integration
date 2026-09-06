@@ -46,7 +46,7 @@ from .const import (
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
 )
-from .light_control import async_update_lights_for_entry
+from .light_control import async_update_lights_for_entry, cancel_pending_light_updates
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -663,6 +663,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     entry_state = hass.data[DOMAIN].get(entry.entry_id)
     if entry_state:
+        cancel_pending_light_updates(entry_state)
         # Unsubscribe global on/off listener
         unsub = entry_state.get(ATTR_LIGHT_ON_LISTENER)
         if unsub is not None:

@@ -25,7 +25,7 @@ from .const import (
     ATTR_USE_FIXED_MIN_TIME,
     SIGNAL_REFRESH_ENTITIES,
 )
-from .light_control import async_update_lights_for_entry
+from .light_control import async_update_lights_for_entry, cancel_pending_light_updates
 
 # Must match __init__.py runtime keys
 ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"
@@ -201,6 +201,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
             data[ATTR_ENABLED] = False
+            cancel_pending_light_updates(data)
 
             # Clear overrides when disabling
             data[ATTR_OVERRIDDEN_LIGHTS] = set()
