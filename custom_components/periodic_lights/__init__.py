@@ -1,7 +1,6 @@
 # __init__.py
 from __future__ import annotations
 
-import asyncio
 import logging
 from pprint import pformat
 from typing import Any
@@ -68,9 +67,6 @@ ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # set[str]
 
 # ---- Override detection gating (runtime only) ----
 ATTR_OVERRIDE_DETECTION_READY = "pl_override_detection_ready"  # bool
-
-# ---- Override listener re-arming ----
-BUFFER_S = 5.0
 
 
 def _normalize_area_value(value):
@@ -184,34 +180,39 @@ def _now_ts(hass: HomeAssistant) -> float:
 
 
 def _matches_expected(
-    *,
-    expected: dict[str, Any],
-    new_state,
-    brightness_enabled: bool,
-    color_temp_enabled: bool,
+    *, expected: dict[str, Any], old_state, new_state,
+    brightness_enabled: bool, color_temp_enabled: bool,
 ) -> bool:
-    """Return True if this state change likely came from Periodic Lights."""
-    until = expected.get("until")
-    if until is None:
+    """Recognize target values and intermediate device transition reports.
+
+    Explicit user commands always take priority. Devices without service context
+    are matched only while moving toward the active target, within its bounds.
+    """
+    context = getattr(new_state, "context", None)
+    if getattr(context, "user_id", None) is not None:
         return False
 
-    exp_bri = expected.get("brightness_pct")
-    exp_kelvin = expected.get("color_temp_kelvin")
-    exp_wants_color = expected.get("expects_color_change", False)
-
-    if exp_bri is not None and brightness_enabled:
-        new_bri = _get_brightness_pct_from_state(new_state)
-        if new_bri is not None and abs(int(new_bri) - int(exp_bri)) > 2:
+    checks = (
+        (brightness_enabled, "brightness_pct", "start_brightness_pct", _get_brightness_pct_from_state, 2),
+        (color_temp_enabled, "color_temp_kelvin", "start_kelvin", _get_kelvin_from_state, 75),
+    )
+    for enabled, key, start_key, read, tolerance in checks:
+        if not enabled or read(old_state) == read(new_state):
+            continue
+        target = expected.get(key)
+        value = read(new_state)
+        start = expected.get(start_key)
+        previous = read(old_state)
+        if target is None or value is None:
             return False
-
-    if exp_kelvin is not None and color_temp_enabled:
-        new_k = _get_kelvin_from_state(new_state)
-        if new_k is not None and abs(int(new_k) - int(exp_kelvin)) > 75:
+        if abs(value - target) <= tolerance:
+            continue
+        if start is None or previous is None:
             return False
-
-    if exp_wants_color:
-        return False
-
+        if not min(start, target) - tolerance <= value <= max(start, target) + tolerance:
+            return False
+        if abs(value - target) > abs(previous - target) + tolerance:
+            return False
     return True
 
 
@@ -404,128 +405,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _notify_entry_state_changed()
 
-    # ---------------------------------------------------------------------
-    # Override listener mute/re-arm
-    # ---------------------------------------------------------------------
-
-    @callback
-    def _unsub_per_light_listener(state: dict[str, Any], light_id: str) -> None:
-        """Unsubscribe (disarm) the per-light override listener, if present."""
-        per_light_listeners = state.get("_per_light_listeners", {})
-        unsub = per_light_listeners.pop(light_id, None)
-        if unsub:
-            unsub()
-
-    @callback
-    def _cancel_rearm_task(state: dict[str, Any], light_id: str) -> None:
-        tasks = state.get("_per_light_rearm_tasks", {})
-        task = tasks.pop(light_id, None)
-        if task and not task.done():
-            task.cancel()
-
-    async def _rearm_listener_after_delay(
-        *,
-        state: dict[str, Any],
-        light_id: str,
-        delay_s: float,
-    ) -> None:
-        """Re-arm the per-light override listener after a delay.
-
-        This is intentionally cancellable (we cancel & reschedule when multiple
-        PL updates happen back-to-back).
-        """
-        await asyncio.sleep(max(0.0, float(delay_s)))
-
-        # Only re-arm if detection is ready and light is still on
-        if not state.get(ATTR_OVERRIDE_DETECTION_READY, False):
-            return
-
-        st = hass.states.get(light_id)
-        if st is None or st.state != "on":
-            return
-
-        # Avoid duplicates / leaks
-        _unsub_per_light_listener(state, light_id)
-
-        @callback
-        def _detect_override(override_event):
-            """Detect manual overrides for this specific light."""
-            if not state.get(ATTR_ENABLED, True):
-                return
-
-            if not state.get(ATTR_OVERRIDE_DETECTION_READY, False):
-                return
-
-            override_entity_id = override_event.data.get("entity_id")
-            if override_entity_id != light_id:
-                return
-
-            override_old_state = override_event.data.get("old_state")
-            override_new_state = override_event.data.get("new_state")
-            if override_new_state is None or override_new_state.state != "on":
-                return
-
-            brightness_enabled = bool(state.get(ATTR_BRIGHTNESS_ENABLED, True))
-            color_temp_enabled = bool(state.get(ATTR_COLOR_TEMP_ENABLED, True))
-
-            new_bri = _get_brightness_pct_from_state(override_new_state)
-            new_k = _get_kelvin_from_state(override_new_state)
-            old_bri = _get_brightness_pct_from_state(override_old_state)
-            old_k = _get_kelvin_from_state(override_old_state)
-
-            bri_changed = brightness_enabled and old_bri != new_bri
-            ct_changed = color_temp_enabled and old_k != new_k
-
-            if bri_changed or ct_changed:
-                _mark_overridden(state, light_id)
-                _LOGGER.info(
-                    "PL MANUAL OVERRIDE | entry_id=%s light=%s | Brightness: %s->%s | ColorTemp: %s->%s",
-                    entry.entry_id,
-                    light_id,
-                    old_bri,
-                    new_bri,
-                    old_k,
-                    new_k,
-                )
-
-        per_light_listeners = state.get("_per_light_listeners", {})
-        per_light_listeners[light_id] = async_track_state_change_event(
-            hass, [light_id], _detect_override
-        )
-        state["_per_light_listeners"] = per_light_listeners
-
-        _LOGGER.debug(
-            "PL | Re-armed override listener for %s after %.1fs",
-            light_id,
-            float(delay_s),
-        )
-
-    def _mute_override_listeners(light_ids: list[str], *, delay_s: float) -> None:
-        """Temporarily disable override listeners for the given lights.
-
-        Used to avoid PL's own service calls being interpreted as manual overrides.
-        """
-        if not light_ids:
-            return
-
-        per_light_rearm_tasks = entry_state.get("_per_light_rearm_tasks", {})
-
-        for lid in light_ids:
-            _unsub_per_light_listener(entry_state, lid)
-            _cancel_rearm_task(entry_state, lid)
-
-            per_light_rearm_tasks[lid] = hass.async_create_task(
-                _rearm_listener_after_delay(state=entry_state, light_id=lid, delay_s=delay_s)
-            )
-
-        entry_state["_per_light_rearm_tasks"] = per_light_rearm_tasks
-
-    # Expose to light_control.py via entry runtime state
-    entry_state["pl_mute_override_listeners"] = _mute_override_listeners
-
     @callback
     def _handle_light_state_change(event) -> None:
-        """Handle light on/off events. Override detection is handled per-light after quiet period."""
+        """Handle on/off events and continuously detect manual adjustments."""
         entity_id: str | None = event.data.get("entity_id")
         if not entity_id:
             return
@@ -543,7 +425,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         old_on = old_state is not None and old_state.state == "on"
         new_on = new_state.state == "on"
 
-        # Light turned off - remove per-light listener and clear override
+        # Light turned off - clear override
         if not new_on:
             _clear_override_for_light(state, entity_id)
             controlled: set[str] = state.get(ATTR_CONTROLLED_LIGHTS, set())
@@ -551,12 +433,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 controlled.discard(entity_id)
                 _notify_entry_state_changed()
             
-            # Disarm override listener + cancel any pending re-arm task
-            _unsub_per_light_listener(state, entity_id)
-            _cancel_rearm_task(state, entity_id)
             return
 
-        # Light turned on - take control and schedule override detection after quiet period
+        # Light turned on - take control
         if new_on and not old_on:
             _clear_override_for_light(state, entity_id)
             _mark_control_for_light_once(state, entity_id)
@@ -564,18 +443,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if state.get(ATTR_TRANSITION_ON_TURN_ON, True):
                 hass.async_create_task(async_update_lights_for_entry(hass, entry.entry_id, force=True))
 
-            # Schedule per-light override listener after a quiet period.
-            # (We intentionally keep this conservative: first on tends to be noisy.)
-            transition = float(state.get(CONF_TRANSITION, DEFAULT_TRANSITION))
-            quiet_period = max(5.0, float(transition) + BUFFER_S)
-            _mute_override_listeners([entity_id], delay_s=quiet_period)
             return
 
-    # Store per-light listener unsub functions + pending re-arm tasks
-    entry_state["_per_light_listeners"] = {}
-    entry_state["_per_light_rearm_tasks"] = {}
+        if not state.get(ATTR_ENABLED, True) or not state.get(ATTR_OVERRIDE_DETECTION_READY, False):
+            return
+        brightness_enabled = bool(state.get(ATTR_BRIGHTNESS_ENABLED, True))
+        color_temp_enabled = bool(state.get(ATTR_COLOR_TEMP_ENABLED, True))
+        bri_changed = brightness_enabled and _get_brightness_pct_from_state(old_state) != _get_brightness_pct_from_state(new_state)
+        ct_changed = color_temp_enabled and _get_kelvin_from_state(old_state) != _get_kelvin_from_state(new_state)
+        if not (bri_changed or ct_changed):
+            return
 
-    # Set up global listener for on/off events only
+        expected = state.get(ATTR_EXPECTED_CHANGES, {}).get(entity_id, {})
+        if expected.get("until", 0) >= _now_ts(hass) and _matches_expected(
+            expected=expected, old_state=old_state, new_state=new_state,
+            brightness_enabled=brightness_enabled, color_temp_enabled=color_temp_enabled,
+        ):
+            return
+        _mark_overridden(state, entity_id)
+
+    # One listener remains active throughout updates and transitions.
     if effective_lights:
         entry_state[ATTR_LIGHT_ON_LISTENER] = async_track_state_change_event(
             hass, effective_lights, _handle_light_state_change
@@ -670,19 +557,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             unsub()
             entry_state[ATTR_LIGHT_ON_LISTENER] = None
         
-        # Unsubscribe all per-light override listeners
-        per_light_listeners = entry_state.get("_per_light_listeners", {})
-        for light_id, unsub_fn in per_light_listeners.items():
-            unsub_fn()
-        per_light_listeners.clear()
-
-        # Cancel any pending re-arm tasks
-        rearm_tasks = entry_state.get("_per_light_rearm_tasks", {})
-        for _lid, task in list(rearm_tasks.items()):
-            if task and not task.done():
-                task.cancel()
-        rearm_tasks.clear()
-
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)

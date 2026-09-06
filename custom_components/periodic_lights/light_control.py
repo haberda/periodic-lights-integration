@@ -6,7 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.components import logbook
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
@@ -43,8 +43,6 @@ from .const import (
 from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
 
 _LOGGER = logging.getLogger(__name__)
-
-BUFFER_S = 5.0
 
 # Must match __init__.py runtime keys
 ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"
@@ -155,6 +153,7 @@ def _log_action(
 def _record_expected_change(
     entry_data: dict[str, Any],
     *,
+    hass: HomeAssistant,
     light_ids: list[str],
     brightness_pct: int | None,
     kelvin: int | None,
@@ -171,10 +170,18 @@ def _record_expected_change(
         entry_data[ATTR_EXPECTED_CHANGES] = expected_map
 
     for lid in light_ids:
+        state = hass.states.get(lid)
+        attrs = state.attributes if state is not None else {}
+        brightness = attrs.get("brightness")
+        previous = expected_map.get(lid, {})
+        if previous.get("until", 0) < now_ts:
+            previous = {}
         expected_map[lid] = {
+            "start_brightness_pct": round(brightness / 255 * 100) if brightness is not None else None,
+            "start_kelvin": attrs.get("color_temp_kelvin"),
             "until": until,
-            "brightness_pct": brightness_pct,
-            "color_temp_kelvin": kelvin,
+            "brightness_pct": brightness_pct if brightness_pct is not None else previous.get("brightness_pct"),
+            "color_temp_kelvin": kelvin if kelvin is not None else previous.get("color_temp_kelvin"),
             "expects_color_change": False,
         }
 
@@ -336,16 +343,7 @@ async def _async_update_lights_for_entry(
         if not eligible:
             return
         svc_data = {"entity_id": eligible, **data}
-        await hass.services.async_call("light", service, svc_data, blocking=False)
-
-    def _mute_override_listeners(entity_ids: list[str], *, delay_s: float) -> None:
-        """Temporarily disable per-light override listeners during PL updates."""
-        mute_fn = entry_data.get("pl_mute_override_listeners")
-        if callable(mute_fn):
-            try:
-                mute_fn(entity_ids, delay_s=delay_s)
-            except Exception:  # noqa: BLE001
-                _LOGGER.debug("PL mute_override_listeners failed", exc_info=True)
+        await hass.services.async_call("light", service, svc_data, blocking=False, context=Context())
 
     # Handle turn_off commands
     turn_off_by_transition: dict[float, list[str]] = {}
@@ -368,8 +366,7 @@ async def _async_update_lights_for_entry(
                 log_to_logbook=True,
             )
 
-        _mute_override_listeners(entity_ids, delay_s=max(2.0, float(trans) + BUFFER_S))
-        _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=None, kelvin=None, transition=trans)
+        _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=None, kelvin=None, transition=trans)
         await _call_light("turn_off", entity_ids, data)
 
 
@@ -414,20 +411,11 @@ async def _async_update_lights_for_entry(
                 transition=trans if trans > 0 else None,
             )
 
-        _mute_override_listeners(entity_ids, delay_s=max(2.0, float(trans) + BUFFER_S))
-        _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=bri, kelvin=kelvin, transition=trans)
+        _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=bri, kelvin=kelvin, transition=trans)
         await _call_light("turn_on", entity_ids, data)
 
     # Split-mode lights (two-step process: brightness then color temp)
     if split_lights:
-        split_ids = [lid for (lid, _b, _k) in split_lights]
-
-        # Keep override detection muted across both sequential calls.
-        _mute_override_listeners(
-            split_ids,
-            delay_s=max(2.0, 2.0 * float(transition) + BUFFER_S) if transition > 0 else BUFFER_S,
-        )
-
         # --- Step 1: brightness with transition ---
         bri_groups: dict[int, list[str]] = {}
         for light_id, bri, _kelvin in split_lights:
@@ -449,7 +437,7 @@ async def _async_update_lights_for_entry(
                     transition=transition,
                 )
 
-            _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=bri, kelvin=None, transition=transition)
+            _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=bri, kelvin=None, transition=transition)
             brightness_tasks.append(_call_light("turn_on", entity_ids, data))
 
         if brightness_tasks:
@@ -479,7 +467,7 @@ async def _async_update_lights_for_entry(
                     transition=transition,
                 )
 
-            _record_expected_change(entry_data, light_ids=entity_ids, brightness_pct=None, kelvin=kelvin, transition=transition)
+            _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=None, kelvin=kelvin, transition=transition)
             color_temp_tasks.append(_call_light("turn_on", entity_ids, data))
 
         if color_temp_tasks:

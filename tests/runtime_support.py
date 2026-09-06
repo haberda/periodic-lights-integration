@@ -24,7 +24,7 @@ def load_runtime():
     module('homeassistant')
     module('homeassistant.components')
     module('homeassistant.components.logbook', async_log_entry=Mock())
-    module('homeassistant.core', HomeAssistant=object, callback=lambda fn: fn)
+    module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object, callback=lambda fn: fn)
     module('homeassistant.config_entries', ConfigEntry=object)
     module('homeassistant.const', EVENT_HOMEASSISTANT_STARTED='started')
     module('homeassistant.helpers')

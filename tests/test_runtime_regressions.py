@@ -64,3 +64,69 @@ class SplitUpdateTests(unittest.IsolatedAsyncioTestCase):
                 await task
         self.assertEqual(len(self.calls), 1)
         self.assertFalse(self.data['pl_update_tasks'])
+
+
+class OverrideTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.runtime = load_runtime()
+        self.integration = self.runtime.package
+        self.listeners = []
+        def listen(hass, ids, callback):
+            self.listeners.append(callback)
+            return lambda: self.listeners.remove(callback)
+        self.integration.async_track_state_change_event = listen
+        self.integration._now_ts = lambda hass: 100
+        self.entry = SimpleNamespace(
+            entry_id='entry', data={'name': 'Test', 'manual_lights': ['light.test']},
+            options={}, title='Test', async_on_unload=lambda fn: None,
+            add_update_listener=lambda fn: lambda: None,
+        )
+        self.hass = SimpleNamespace(
+            data={}, is_running=True,
+            states=SimpleNamespace(get=lambda eid: self.state(50)),
+            config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock()),
+        )
+        await self.integration.async_setup_entry(self.hass, self.entry)
+        self.data = self.hass.data['periodic_lights']['entry']
+        self.data['pl_override_detection_ready'] = True
+        self.expected = {
+            'until': 200, 'brightness_pct': 100, 'start_brightness_pct': 20,
+            'color_temp_kelvin': 5000, 'start_kelvin': 2500,
+        }
+        self.data['pl_expected_changes']['light.test'] = self.expected
+
+    def state(self, brightness, user=None, kelvin=3000):
+        return SimpleNamespace(state='on', name='Test', attributes={
+            'brightness': round(brightness * 255 / 100), 'color_temp_kelvin': kelvin,
+        }, context=SimpleNamespace(user_id=user))
+
+    def change(self, old, new):
+        for listener in tuple(self.listeners):
+            listener(SimpleNamespace(data={'entity_id': 'light.test', 'old_state': old, 'new_state': new}))
+
+    async def test_user_adjustment_during_transition_is_detected(self):
+        self.change(self.state(50), self.state(60, user='user'))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_intermediate_transition_report_is_not_override(self):
+        self.change(self.state(50), self.state(60))
+        self.assertFalse(self.data['overridden_lights'])
+
+    async def test_device_adjustment_away_from_target_is_detected(self):
+        self.change(self.state(50), self.state(30))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_adjustment_after_expected_window_is_detected(self):
+        self.expected['until'] = 99
+        self.change(self.state(50), self.state(60))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_repeated_updates_do_not_remove_override_listener(self):
+        self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
+        self.hass.services = SimpleNamespace(async_call=AsyncMock())
+        self.data.update(transition=60, update_interval=60)
+        for _ in range(3):
+            await self.runtime.control.async_update_lights_for_entry(self.hass, 'entry', force=True)
+        self.assertEqual(len(self.listeners), 1)
+        self.change(self.state(50), self.state(60, user='user'))
+        self.assertIn('light.test', self.data['overridden_lights'])
