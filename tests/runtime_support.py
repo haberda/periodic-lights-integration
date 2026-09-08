@@ -37,8 +37,12 @@ def load_runtime():
         async def async_added_to_hass(self):
             pass
     module('homeassistant.components.image', ImageEntity=Entity)
+    module('homeassistant.components.sensor', SensorEntity=Entity, SensorDeviceClass=SimpleNamespace(ENUM='enum'))
+    module('homeassistant.components.switch', SwitchEntity=Entity, SwitchDeviceClass=SimpleNamespace(SWITCH='switch'))
+    module('homeassistant.components.select', SelectEntity=Entity)
+    module('homeassistant.components.time', TimeEntity=Entity)
     module('homeassistant.components.number', NumberEntity=Entity, NumberMode=SimpleNamespace(BOX='box'))
-    module('homeassistant.helpers.entity', DeviceInfo=dict)
+    module('homeassistant.helpers.entity', DeviceInfo=dict, EntityCategory=SimpleNamespace(DIAGNOSTIC='diagnostic'))
     module('homeassistant.helpers.entity_platform', AddEntitiesCallback=object)
     module('homeassistant.helpers.restore_state', RestoreEntity=RestoreEntity)
     module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object, callback=lambda fn: fn)
@@ -59,7 +63,7 @@ def load_runtime():
     module('homeassistant.util.dt', utcnow=lambda: datetime.now(timezone.utc), as_local=lambda dt: dt)
     package = module('review_periodic_lights', __path__=[str(ROOT)])
     with patch.dict(sys.modules, modules):
-        for name in ('const', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'light_control', 'number', 'config_flow', 'preview', 'image'):
+        for name in ('const', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'light_control', 'temperature_entities', 'number', 'config_flow', 'sensor', 'switch', 'select', 'time', 'preview', 'image'):
             spec = importlib.util.spec_from_file_location(f'{package.__name__}.{name}', ROOT / f'{name}.py')
             loaded = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = loaded

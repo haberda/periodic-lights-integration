@@ -241,6 +241,34 @@ Per-light ranges, manual overrides, and light on/off state are not forecasts in 
 setup-wide graph. Daylight-saving days contain 23 or 25 actual hours where applicable.
 The image has no hover tooltips and requires no custom dashboard resource.
 
+## Per-light adaptation diagnostics
+
+Each configured light has an **Adaptation** diagnostic sensor on the setup's device page.
+Its state explains whether the light is adapting, off, unavailable, manually overridden,
+or blocked by the master or control switches. If several conditions apply, unavailable
+and off take precedence, followed by master disable, controls disable, and manual override.
+The more-info attributes include rounded per-light targets, enabled controls, and the last
+command-sent timestamp. A sent command is not confirmation that a bulb applied it.
+Targets describe the configured output even while a light is off or overridden.
+No per-light resume button or pause controls are added.
+
+## Separate temperature curve
+
+The **Use separate temperature curve** switch defaults off. With it off, the existing
+shaping and timing controls continue to govern both brightness and temperature.
+Turn it on to use the new **Temperature Shaping Function**, **Temperature Shaping
+Parameter**, **Temperature Use Fixed Minimum Time**, and **Temperature Fixed Minimum
+Time** controls for temperature only. The original controls then govern brightness.
+On first enable, temperature settings copy the shared curve unless you have already
+edited a temperature control. Later toggles retain your temperature settings.
+The controls stay visible while linked; their attributes show whether they apply.
+All five controls restore across restarts. Bedtime still uses the configured minimums,
+and global and per-light brightness/Kelvin ranges continue to set output limits.
+Place the existing controls and temperature controls in separate Entities cards to
+make a Brightness Curve / Temperature Curve dashboard layout.
+
+The daily curve preview applies these temperature settings to its temperature plot.
+
 Validation: run `python -m unittest discover -s tests -p "test_runtime*.py"`.
 These unit tests mock the Home Assistant boundary; a live Home Assistant smoke test
 is still recommended before deployment.

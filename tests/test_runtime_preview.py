@@ -90,3 +90,56 @@ class PreviewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(point.kelvin, 2500)
         self.assertGreater(point.brightness, 50)
+
+    async def test_preview_diagnostics_and_commands_agree_with_both_features(self):
+        data = {
+            "lights": ["light.desk"],
+            "use_fixed_min_time": True,
+            "fixed_min_time": "03:00:00",
+            "temperature_use_fixed_min_time": True,
+            "temperature_fixed_min_time": "09:00:00",
+            "temperature_shaping_param": 2,
+        }
+        hass = SimpleNamespace(
+            data={"periodic_lights": {"entry": data}},
+            states=SimpleNamespace(
+                get=lambda eid: SimpleNamespace(state="on", name="Desk", attributes={})
+            ),
+            services=SimpleNamespace(async_call=AsyncMock()),
+        )
+        control = self.runtime.control
+        sensors = self.runtime.package.sensor
+        control.dt_util.utcnow = lambda: self.now
+        control.daily_pct = lambda hass: (0, self.cycle)
+        sensors.daily_pct = lambda hass: (0, self.cycle)
+        diagnostic = sensors.PeriodicLightsAdaptationSensor(
+            hass, "entry", "Room", "light.desk"
+        )
+        for separate in (False, True):
+            for shape in (
+                "gamma_sine",
+                "time_warped_sine",
+                "triangular",
+                "eased_triangular",
+            ):
+                with self.subTest(separate=separate, shape=shape):
+                    data.update(
+                        separate_temperature_curve=separate,
+                        temperature_shaping_function=shape,
+                    )
+                    point = self.runtime.package.curve_model.curve_at(
+                        data, self.now, self.cycle
+                    )
+                    attrs = diagnostic.extra_state_attributes
+                    await control.async_update_lights_for_entry(
+                        hass, "entry", force=True
+                    )
+                    command = hass.services.async_call.call_args.args[2]
+                    self.assertEqual(command["brightness_pct"], round(point.brightness))
+                    self.assertEqual(command["color_temp_kelvin"], round(point.kelvin))
+                    self.assertEqual(
+                        attrs["target_brightness_pct"], command["brightness_pct"]
+                    )
+                    self.assertEqual(
+                        attrs["target_color_temp_kelvin"], command["color_temp_kelvin"]
+                    )

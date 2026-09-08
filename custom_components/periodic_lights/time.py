@@ -20,12 +20,18 @@ from .const import (
 )
 
 
+from .temperature_entities import TemperatureCurveTime
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the fixed minimum time entity for a config entry."""
+    async_add_entities([
+        TemperatureCurveTime(hass, entry.entry_id, entry.title, 'temperature_fixed_min_time', 'Temperature Fixed Minimum Time'),
+    ])
     name = entry.data.get(CONF_NAME, entry.title)
     async_add_entities(
         [
