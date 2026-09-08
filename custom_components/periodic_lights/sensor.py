@@ -4,17 +4,19 @@ from datetime import timedelta
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_time_interval, async_track_state_change_event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    CONF_LIGHTS,
+    SIGNAL_REFRESH_ENTITIES,
     CONF_NAME,
     CONF_MIN_BRIGHTNESS,
     CONF_MAX_BRIGHTNESS,
@@ -37,6 +39,8 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
 )
 from .solar_curve import daily_pct, map_pct_to_range, SolarCycle, apply_shaping
+
+from .light_control import light_adaptation_status, light_targets
 
 from .temperature_curve import temperature_curve_settings
 
@@ -64,6 +68,23 @@ async def async_setup_entry(
         ),
     ]
     async_add_entities(entities)
+    known: set[str] = set()
+
+    @callback
+    def add_light_diagnostics() -> None:
+        lights = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get(CONF_LIGHTS, [])
+        new_lights = set(lights) - known
+        if new_lights:
+            known.update(new_lights)
+            async_add_entities([
+                PeriodicLightsAdaptationSensor(hass, entry.entry_id, name, lid)
+                for lid in sorted(new_lights)
+            ])
+
+    add_light_diagnostics()
+    entry.async_on_unload(async_dispatcher_connect(
+        hass, f"{SIGNAL_REFRESH_ENTITIES}_{entry.entry_id}", add_light_diagnostics
+    ))
 
 
 def _parse_fixed_min_seconds(raw: Any) -> float:
@@ -376,3 +397,73 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         attrs["min_kelvin"] = data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN)
         attrs["max_kelvin"] = data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN)
         return attrs
+
+
+class PeriodicLightsAdaptationSensor(SensorEntity):
+    """Explain why a configured light is or is not being updated."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_translation_key = "adaptation_status"
+    _attr_options = ["adapting", "light_off", "manually_overridden", "integration_disabled", "controls_disabled", "light_unavailable"]
+    _attr_icon = "mdi:lightbulb-auto-outline"
+
+    def __init__(self, hass, entry_id, setup_name, light_id):
+        self.hass = hass
+        self._entry_id = entry_id
+        self._setup_name = setup_name
+        self._light_id = light_id
+        state = hass.states.get(light_id)
+        self._attr_name = f"{state.name if state else light_id} Adaptation"
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_{light_id}_adaptation"
+
+    @property
+    def device_info(self):
+        return DeviceInfo(identifiers={(DOMAIN, self._entry_id)}, name=self._setup_name,
+                          manufacturer=MANUFACTURER, model="Light Setup")
+
+    @property
+    def available(self):
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        return self._light_id in data.get(CONF_LIGHTS, [])
+
+    @property
+    def native_value(self):
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        return light_adaptation_status(self.hass, data, self._light_id)
+
+    @property
+    def extra_state_attributes(self):
+        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        phase, _ = _compute_phase_with_optional_override(self.hass, data)
+        shaped = apply_shaping(phase, data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
+                               data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
+        temperature_settings = temperature_curve_settings(data)
+        temperature_phase, _ = _compute_phase_with_optional_override(self.hass, temperature_settings)
+        temperature_shaped = apply_shaping(
+            temperature_phase,
+            temperature_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
+            temperature_settings.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM),
+        )
+        brightness, kelvin = light_targets(data, self._light_id, shaped, temperature_shaped)
+        return {
+            "light": self._light_id,
+            "target_brightness_pct": brightness,
+            "target_color_temp_kelvin": kelvin,
+            "last_command_sent": data.get("pl_last_command_sent", {}).get(self._light_id),
+            "brightness_control": bool(data.get(ATTR_BRIGHTNESS_ENABLED, True)),
+            "color_temperature_control": bool(data.get(ATTR_COLOR_TEMP_ENABLED, True)),
+        }
+
+    @callback
+    def _refresh(self, *_):
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        for signal in (SIGNAL_REFRESH_ENTITIES, SIGNAL_UPDATE_SENSORS):
+            self.async_on_remove(async_dispatcher_connect(self.hass, f"{signal}_{self._entry_id}", self._refresh))
+        self.async_on_remove(async_track_state_change_event(self.hass, [self._light_id], self._refresh))
+        self.async_on_remove(async_track_time_interval(self.hass, self._refresh, timedelta(minutes=1)))

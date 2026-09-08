@@ -23,6 +23,9 @@ from .const import (
     ATTR_LIGHT_SETTINGS,
     ATTR_SHAPING_PARAM,
 )
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from .const import SIGNAL_REFRESH_ENTITIES
+
 from .light_control import async_update_lights_for_entry
 
 
@@ -134,6 +137,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
 
         self._attr_native_value = value
         self.async_write_ha_state()
+        async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the input and stored config."""
@@ -147,6 +151,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
 
         self._attr_native_value = value
         self.async_write_ha_state()
+        async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
 
 class _BasePerLightNumber(RestoreEntity, NumberEntity):
@@ -233,6 +238,7 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
 
         self._attr_native_value = value
         self.async_write_ha_state()
+        async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the per-light override in hass.data."""
@@ -244,6 +250,7 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
 
         self._attr_native_value = value
         self.async_write_ha_state()
+        async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
 
 # ---------- Global inputs (per setup) ----------

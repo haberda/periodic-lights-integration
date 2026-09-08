@@ -34,12 +34,12 @@ def load_runtime():
     class RestoreEntity:
         async def async_added_to_hass(self):
             pass
-    module('homeassistant.components.sensor', SensorEntity=Entity)
+    module('homeassistant.components.sensor', SensorEntity=Entity, SensorDeviceClass=SimpleNamespace(ENUM='enum'))
     module('homeassistant.components.switch', SwitchEntity=Entity, SwitchDeviceClass=SimpleNamespace(SWITCH='switch'))
     module('homeassistant.components.select', SelectEntity=Entity)
     module('homeassistant.components.time', TimeEntity=Entity)
     module('homeassistant.components.number', NumberEntity=Entity, NumberMode=SimpleNamespace(BOX='box'))
-    module('homeassistant.helpers.entity', DeviceInfo=dict)
+    module('homeassistant.helpers.entity', DeviceInfo=dict, EntityCategory=SimpleNamespace(DIAGNOSTIC='diagnostic'))
     module('homeassistant.helpers.entity_platform', AddEntitiesCallback=object)
     module('homeassistant.helpers.restore_state', RestoreEntity=RestoreEntity)
     module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object, callback=lambda fn: fn)

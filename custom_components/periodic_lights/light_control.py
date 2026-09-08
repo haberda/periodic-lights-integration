@@ -37,6 +37,7 @@ from .const import (
     DEFAULT_SHAPING_PARAM,
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_UPDATE_SENSORS,
+    SIGNAL_REFRESH_ENTITIES,
 )
 from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
 
@@ -186,6 +187,42 @@ def _record_expected_change(
         }
 
 
+def light_adaptation_status(hass: HomeAssistant, data: dict[str, Any], light_id: str) -> str:
+    """Return the same eligibility reason used by control and diagnostics."""
+    state = hass.states.get(light_id)
+    if state is None or state.state in ("unknown", "unavailable"):
+        return "light_unavailable"
+    if state.state != "on":
+        return "light_off"
+    if not data.get(ATTR_ENABLED, True):
+        return "integration_disabled"
+    if not (data.get(ATTR_BRIGHTNESS_ENABLED, True) or data.get(ATTR_COLOR_TEMP_ENABLED, True)):
+        return "controls_disabled"
+    if light_id in data.get(ATTR_OVERRIDDEN_LIGHTS, set()):
+        return "manually_overridden"
+    return "adapting"
+
+
+def light_targets(data: dict[str, Any], light_id: str, shaped: float, temperature_shaped: float) -> tuple[int | None, int | None]:
+    """Calculate command targets, including bedtime and per-light ranges."""
+    settings = data.get(ATTR_LIGHT_SETTINGS, {}).get(light_id, {})
+    def value(key, default):
+        return float(settings.get(key, data.get(key, default)))
+    pct = 0.0 if data.get(ATTR_BEDTIME, False) else shaped
+    temperature_pct = 0.0 if data.get(ATTR_BEDTIME, False) else temperature_shaped
+    brightness = None
+    kelvin = None
+    if data.get(ATTR_BRIGHTNESS_ENABLED, True):
+        brightness = round(max(0, min(100, map_pct_to_range(
+            pct, value(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS), value(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+        ))))
+    if data.get(ATTR_COLOR_TEMP_ENABLED, True):
+        target = map_pct_to_range(temperature_pct, value(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN), value(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
+        if target > 0:
+            kelvin = round(target)
+    return brightness, kelvin
+
+
 def cancel_pending_light_updates(entry_data: dict[str, Any]) -> None:
     """Cancel entry-owned updates, including a delayed split color step."""
     for task in tuple(entry_data.get("pl_update_tasks", ())):
@@ -242,15 +279,6 @@ async def _async_update_lights_for_entry(
 
     now = dt_util.utcnow()
 
-    brightness_enabled = bool(entry_data.get(ATTR_BRIGHTNESS_ENABLED, True))
-    color_temp_enabled = bool(entry_data.get(ATTR_COLOR_TEMP_ENABLED, True))
-    bedtime = bool(entry_data.get(ATTR_BEDTIME, False))
-    per_light_settings: dict[str, dict[str, Any]] = entry_data.get(ATTR_LIGHT_SETTINGS, {}) or {}
-
-    global_min_brightness = float(entry_data.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS))
-    global_max_brightness = float(entry_data.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS))
-    global_min_kelvin = float(entry_data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN))
-    global_max_kelvin = float(entry_data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
     transition = float(entry_data.get(CONF_TRANSITION, DEFAULT_TRANSITION))
 
     shaping_param = float(entry_data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
@@ -268,61 +296,16 @@ async def _async_update_lights_for_entry(
 
     reason = _reason(entry_data, force=force)
 
-    overridden: set[str] = entry_data.get(ATTR_OVERRIDDEN_LIGHTS) or set()
-    # Cache all light states in one pass
-    light_states: dict[str, Any] = {}
-    for light_id in lights:
-        light_states[light_id] = hass.states.get(light_id)
-
     # Collect all light data first
     lights_to_turn_off: list[tuple[str, float]] = []  # (light_id, transition)
     lights_to_update: list[tuple[str, int | None, int | None]] = []  # (light_id, bri, kelvin)
     
     for light_id in lights:
-        if light_id in overridden:
-            _LOGGER.debug("PL SKIP OVERRIDDEN | entry_id=%s light=%s", entry_id, light_id)
+        if light_adaptation_status(hass, entry_data, light_id) != "adapting":
             continue
+        desired_bri, desired_kelvin = light_targets(entry_data, light_id, pct_shaped, temperature_shaped)
 
-        st = light_states.get(light_id)
-        if st is None or st.state != "on":
-            continue
-
-        this_light = per_light_settings.get(light_id)
-        
-        if this_light:
-            min_brightness = float(this_light.get(CONF_MIN_BRIGHTNESS, global_min_brightness))
-            max_brightness = float(this_light.get(CONF_MAX_BRIGHTNESS, global_max_brightness))
-            min_kelvin = float(this_light.get(CONF_MIN_KELVIN, global_min_kelvin))
-            max_kelvin = float(this_light.get(CONF_MAX_KELVIN, global_max_kelvin))
-        else:
-            min_brightness = global_min_brightness
-            max_brightness = global_max_brightness
-            min_kelvin = global_min_kelvin
-            max_kelvin = global_max_kelvin
-
-        desired_bri: int | None = None
-        desired_kelvin: int | None = None
-
-        if brightness_enabled:
-            if bedtime:
-                bri = max(0, min(100, int(round(min_brightness))))
-            else:
-                bri = map_pct_to_range(pct_shaped, min_brightness, max_brightness)
-                bri = max(0, min(100, bri))
-            desired_bri = int(round(bri))
-
-        if color_temp_enabled:
-            if bedtime:
-                k = min_kelvin
-            else:
-                k = map_pct_to_range(temperature_shaped, min_kelvin, max_kelvin)
-            if k > 0:
-                desired_kelvin = int(round(k))
-
-        if desired_bri is None and desired_kelvin is None and transition <= 0:
-            continue
-
-        if brightness_enabled and desired_bri is not None and desired_bri < 1:
+        if desired_bri is not None and desired_bri < 1:
             lights_to_turn_off.append((light_id, transition))
             continue
         lights_to_update.append((light_id, desired_bri, desired_kelvin))
@@ -341,14 +324,16 @@ async def _async_update_lights_for_entry(
         eligible = [
             lid for lid in entity_ids
             if lid in current.get(CONF_LIGHTS, [])
-            and lid not in current.get(ATTR_OVERRIDDEN_LIGHTS, set())
-            and (state := hass.states.get(lid)) is not None
-            and state.state == "on"
+            and light_adaptation_status(hass, current, lid) == "adapting"
         ]
         if not eligible:
             return
         svc_data = {"entity_id": eligible, **data}
         await hass.services.async_call("light", service, svc_data, blocking=False, context=Context())
+        sent = dt_util.utcnow().isoformat()
+        for lid in eligible:
+            entry_data.setdefault("pl_last_command_sent", {})[lid] = sent
+        async_dispatcher_send(hass, f"{SIGNAL_REFRESH_ENTITIES}_{entry_id}")
 
     # Handle turn_off commands
     turn_off_by_transition: dict[float, list[str]] = {}
