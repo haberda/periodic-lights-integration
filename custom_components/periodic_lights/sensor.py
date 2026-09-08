@@ -38,6 +38,8 @@ from .const import (
 )
 from .solar_curve import daily_pct, map_pct_to_range, SolarCycle, apply_shaping
 
+from .temperature_curve import temperature_curve_settings
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -338,7 +340,7 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         return master and ct_enabled
 
     def _recalculate(self) -> None:
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        entry_data = temperature_curve_settings(self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}))
 
         # Baseline daily phase
         phase, cycle = _compute_phase_with_optional_override(self.hass, entry_data)
