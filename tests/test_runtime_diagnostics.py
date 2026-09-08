@@ -89,3 +89,58 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(add.call_count, 3)
         callback()
         self.assertEqual(add.call_count, 3)
+
+    async def test_independent_temperature_shape_matches_commands_and_ranges(self):
+        self.data.update(
+            shaping_param=1,
+            separate_temperature_curve=True,
+            temperature_shaping_param=2,
+        )
+        self.data["light_settings"]["light.desk"].update(
+            min_kelvin=3000, max_kelvin=4000
+        )
+        self.runtime.package.sensor._compute_phase_with_optional_override = (
+            lambda *a: (0.25, None)
+        )
+        self.runtime.control._compute_phase_with_optional_override = lambda *a: 0.25
+        attrs = self.sensor.extra_state_attributes
+        self.assertEqual(attrs["target_color_temp_kelvin"], 3500)
+        self.assertEqual(attrs["target_brightness_pct"], 62)
+        await self.runtime.control.async_update_lights_for_entry(
+            self.hass, "entry", force=True
+        )
+        payload = self.hass.services.async_call.call_args.args[2]
+        self.assertEqual(payload["brightness_pct"], attrs["target_brightness_pct"])
+        self.assertEqual(payload["color_temp_kelvin"], attrs["target_color_temp_kelvin"])
+
+    async def test_independent_temperature_time_and_linked_mode_match_commands(self):
+        self.data.update(
+            fixed_min_time="00:00:00",
+            separate_temperature_curve=True,
+            temperature_use_fixed_min_time=True,
+            temperature_fixed_min_time="12:00:00",
+        )
+
+        def phase(hass, settings):
+            return 0 if settings.get("fixed_min_time") == "12:00:00" else 0.5
+
+        self.runtime.control._compute_phase_with_optional_override = phase
+        self.runtime.package.sensor._compute_phase_with_optional_override = (
+            lambda hass, settings: (phase(hass, settings), None)
+        )
+        for separate, bedtime, expected_brightness, expected_kelvin in (
+            (True, False, 80, 2500),
+            (False, False, 80, 5000),
+            (True, True, 20, 2500),
+        ):
+            with self.subTest(separate=separate, bedtime=bedtime):
+                self.data.update(separate_temperature_curve=separate, bedtime=bedtime)
+                attrs = self.sensor.extra_state_attributes
+                self.assertEqual(attrs["target_brightness_pct"], expected_brightness)
+                self.assertEqual(attrs["target_color_temp_kelvin"], expected_kelvin)
+                await self.runtime.control.async_update_lights_for_entry(
+                    self.hass, "entry", force=True
+                )
+                payload = self.hass.services.async_call.call_args.args[2]
+                self.assertEqual(payload["brightness_pct"], expected_brightness)
+                self.assertEqual(payload["color_temp_kelvin"], expected_kelvin)

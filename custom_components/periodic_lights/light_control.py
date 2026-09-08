@@ -41,6 +41,8 @@ from .const import (
 )
 from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
 
+from .temperature_curve import temperature_curve_settings
+
 _LOGGER = logging.getLogger(__name__)
 
 # Must match __init__.py runtime keys
@@ -201,12 +203,13 @@ def light_adaptation_status(hass: HomeAssistant, data: dict[str, Any], light_id:
     return "adapting"
 
 
-def light_targets(data: dict[str, Any], light_id: str, shaped: float) -> tuple[int | None, int | None]:
+def light_targets(data: dict[str, Any], light_id: str, shaped: float, temperature_shaped: float) -> tuple[int | None, int | None]:
     """Calculate command targets, including bedtime and per-light ranges."""
     settings = data.get(ATTR_LIGHT_SETTINGS, {}).get(light_id, {})
     def value(key, default):
         return float(settings.get(key, data.get(key, default)))
     pct = 0.0 if data.get(ATTR_BEDTIME, False) else shaped
+    temperature_pct = 0.0 if data.get(ATTR_BEDTIME, False) else temperature_shaped
     brightness = None
     kelvin = None
     if data.get(ATTR_BRIGHTNESS_ENABLED, True):
@@ -214,7 +217,7 @@ def light_targets(data: dict[str, Any], light_id: str, shaped: float) -> tuple[i
             pct, value(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS), value(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
         ))))
     if data.get(ATTR_COLOR_TEMP_ENABLED, True):
-        target = map_pct_to_range(pct, value(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN), value(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
+        target = map_pct_to_range(temperature_pct, value(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN), value(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN))
         if target > 0:
             kelvin = round(target)
     return brightness, kelvin
@@ -283,6 +286,13 @@ async def _async_update_lights_for_entry(
 
     phase = _compute_phase_with_optional_override(hass, entry_data)
     pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
+    temperature_settings = temperature_curve_settings(entry_data)
+    temperature_phase = _compute_phase_with_optional_override(hass, temperature_settings)
+    temperature_shaped = apply_shaping(
+        temperature_phase,
+        temperature_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
+        temperature_settings.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM),
+    )
 
     reason = _reason(entry_data, force=force)
 
@@ -293,7 +303,7 @@ async def _async_update_lights_for_entry(
     for light_id in lights:
         if light_adaptation_status(hass, entry_data, light_id) != "adapting":
             continue
-        desired_bri, desired_kelvin = light_targets(entry_data, light_id, pct_shaped)
+        desired_bri, desired_kelvin = light_targets(entry_data, light_id, pct_shaped, temperature_shaped)
 
         if desired_bri is not None and desired_bri < 1:
             lights_to_turn_off.append((light_id, transition))

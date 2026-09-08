@@ -34,11 +34,18 @@ ATTR_LAST_APPLIED = "pl_last_applied"
 ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # logbook gating only
 
 
+from .temperature_entities import TemperatureCurveSwitch
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    async_add_entities([
+        TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'separate_temperature_curve', 'Use separate temperature curve'),
+        TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'temperature_use_fixed_min_time', 'Temperature Use Fixed Minimum Time'),
+    ])
     data = entry.data
     name = data.get(CONF_NAME, entry.title)
     lights = data.get(CONF_LIGHTS, [])

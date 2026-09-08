@@ -42,6 +42,8 @@ from .solar_curve import daily_pct, map_pct_to_range, SolarCycle, apply_shaping
 
 from .light_control import light_adaptation_status, light_targets
 
+from .temperature_curve import temperature_curve_settings
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -359,7 +361,7 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         return master and ct_enabled
 
     def _recalculate(self) -> None:
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        entry_data = temperature_curve_settings(self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}))
 
         # Baseline daily phase
         phase, cycle = _compute_phase_with_optional_override(self.hass, entry_data)
@@ -438,7 +440,14 @@ class PeriodicLightsAdaptationSensor(SensorEntity):
         phase, _ = _compute_phase_with_optional_override(self.hass, data)
         shaped = apply_shaping(phase, data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
                                data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
-        brightness, kelvin = light_targets(data, self._light_id, shaped)
+        temperature_settings = temperature_curve_settings(data)
+        temperature_phase, _ = _compute_phase_with_optional_override(self.hass, temperature_settings)
+        temperature_shaped = apply_shaping(
+            temperature_phase,
+            temperature_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
+            temperature_settings.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM),
+        )
+        brightness, kelvin = light_targets(data, self._light_id, shaped, temperature_shaped)
         return {
             "light": self._light_id,
             "target_brightness_pct": brightness,

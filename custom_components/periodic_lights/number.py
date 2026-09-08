@@ -29,12 +29,18 @@ from .const import SIGNAL_REFRESH_ENTITIES
 from .light_control import async_update_lights_for_entry
 
 
+from .temperature_entities import TemperatureCurveNumber
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up number (input) entities for a config entry."""
+    async_add_entities([
+        TemperatureCurveNumber(hass, entry.entry_id, entry.title, 'temperature_shaping_param', 'Temperature Shaping Parameter'),
+    ])
     all_data = hass.data[DOMAIN][entry.entry_id]
     setup_name = entry.data.get(CONF_NAME, entry.title)
     lights: list[str] = all_data.get(CONF_LIGHTS, [])
