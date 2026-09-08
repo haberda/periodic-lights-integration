@@ -3,8 +3,12 @@
   "name": "Periodic Lights",
   "version": "0.1.0",
   "documentation": "https://github.com/haberda/periodic-lights-integration",
-  "requirements": [],
-  "codeowners": ["@haberda"],
+  "requirements": [
+    "Pillow==12.3.0"
+  ],
+  "codeowners": [
+    "@haberda"
+  ],
   "config_flow": true,
   "iot_class": "calculated"
 }

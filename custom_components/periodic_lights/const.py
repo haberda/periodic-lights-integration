@@ -52,6 +52,6 @@ DEFAULT_FIXED_MIN_TIME = "00:00"
 DEFAULT_DEBOUNCE_DELAY = 0.3        # seconds - small delay to prevent CPU thrashing on rapid state changes
 
 # Add "button"
-PLATFORMS = ["switch", "sensor", "number", "select", "time", "button"]
+PLATFORMS = ["switch", "sensor", "number", "select", "time", "button", "image"]
 
 MANUFACTURER = "Periodic Lights"
