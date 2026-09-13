@@ -272,3 +272,18 @@ The daily curve preview applies these temperature settings to its temperature pl
 Validation: run `python -m unittest discover -s tests -p "test_runtime*.py"`.
 These unit tests mock the Home Assistant boundary; a live Home Assistant smoke test
 is still recommended before deployment.
+
+## Avoiding redundant light commands
+
+Periodic updates compare each light's rounded brightness and Kelvin targets with its
+last successfully sent values. Unchanged channels are omitted; if neither channel
+changed, no command is sent. Split updates also skip unchanged channels and do not
+wait for a brightness transition when only temperature needs updating.
+
+Forced updates (including the clear-overrides button) still resend current targets.
+The cache is runtime-only and is cleared by the existing off/on, unavailable,
+disable, and clear-overrides handling. Failed service calls are retried on a later
+update. Successful service execution does not guarantee a physical bulb applied it;
+a forced update can resynchronize it. Turn-off commands retain their existing behavior.
+Skipped updates do not advance the diagnostic last-command timestamp or extend the
+manual-override detection window.
