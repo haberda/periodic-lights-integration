@@ -272,3 +272,15 @@ The daily curve preview applies these temperature settings to its temperature pl
 Validation: run `python -m unittest discover -s tests -p "test_runtime*.py"`.
 These unit tests mock the Home Assistant boundary; a live Home Assistant smoke test
 is still recommended before deployment.
+
+## Integration branding
+
+Home Assistant 2026.3 and newer automatically loads the bundled icon and logo from
+`custom_components/periodic_lights/brand/`. These are copies of `icon.png` and
+`logo.png` in `assets/images/`; when updating the artwork, update both locations.
+The brand folder ships with the integration for HACS and manual installations.
+After installing the updated integration, restart Home Assistant and refresh the
+browser to see the branding. Earlier Home Assistant versions do not load bundled
+brand images. This affects integration branding, not individual entity icons.
+
+See [Home Assistant's brand image documentation](https://developers.home-assistant.io/docs/core/integration/brand_images/).
