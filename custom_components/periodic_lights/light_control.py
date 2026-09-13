@@ -269,6 +269,14 @@ async def _async_update_lights_for_entry(
         if desired_bri is not None and desired_bri < 1:
             lights_to_turn_off.append((light_id, transition))
             continue
+        if not force:
+            last = entry_data.get(ATTR_LAST_APPLIED, {}).get(light_id, {})
+            if desired_bri == last.get("brightness_pct"):
+                desired_bri = None
+            if desired_kelvin == last.get("color_temp_kelvin"):
+                desired_kelvin = None
+        if desired_bri is None and desired_kelvin is None:
+            continue
         lights_to_update.append((light_id, desired_bri, desired_kelvin))
 
     async def _call_light(service: str, entity_ids: list[str], data: dict[str, Any]) -> None:
@@ -290,7 +298,29 @@ async def _async_update_lights_for_entry(
         if not eligible:
             return
         svc_data = {"entity_id": eligible, **data}
-        await hass.services.async_call("light", service, svc_data, blocking=False, context=Context())
+        _record_expected_change(
+            entry_data, hass=hass, light_ids=eligible,
+            brightness_pct=data.get("brightness_pct"), kelvin=data.get("color_temp_kelvin"),
+            transition=float(data.get("transition", 0)),
+        )
+        expected = {lid: entry_data[ATTR_EXPECTED_CHANGES][lid] for lid in eligible}
+        try:
+            # Cache only successful service executions, so failures can be retried.
+            await hass.services.async_call("light", service, svc_data, blocking=True, context=Context())
+        except BaseException:
+            for lid in eligible:
+                if entry_data.get(ATTR_EXPECTED_CHANGES, {}).get(lid) is expected[lid]:
+                    entry_data[ATTR_EXPECTED_CHANGES].pop(lid, None)
+                entry_data.get(ATTR_LAST_APPLIED, {}).pop(lid, None)
+            raise
+        for lid in eligible:
+            # Off/on, disable, or override clearing during the call invalidates this session.
+            if (service == "turn_on"
+                and hass.data.get(DOMAIN, {}).get(entry_id) is entry_data
+                and entry_data.get(ATTR_EXPECTED_CHANGES, {}).get(lid) is expected[lid]
+                and light_adaptation_status(hass, entry_data, lid) == "adapting"):
+                last = entry_data.setdefault(ATTR_LAST_APPLIED, {}).setdefault(lid, {})
+                last.update({key: data[key] for key in ("brightness_pct", "color_temp_kelvin") if key in data})
         sent = dt_util.utcnow().isoformat()
         for lid in eligible:
             entry_data.setdefault("pl_last_command_sent", {})[lid] = sent
@@ -317,7 +347,6 @@ async def _async_update_lights_for_entry(
                 log_to_logbook=True,
             )
 
-        _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=None, kelvin=None, transition=trans)
         await _call_light("turn_off", entity_ids, data)
 
 
@@ -362,7 +391,6 @@ async def _async_update_lights_for_entry(
                 transition=trans if trans > 0 else None,
             )
 
-        _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=bri, kelvin=kelvin, transition=trans)
         await _call_light("turn_on", entity_ids, data)
 
     # Split-mode lights (two-step process: brightness then color temp)
@@ -388,7 +416,6 @@ async def _async_update_lights_for_entry(
                     transition=transition,
                 )
 
-            _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=bri, kelvin=None, transition=transition)
             brightness_tasks.append(_call_light("turn_on", entity_ids, data))
 
         if brightness_tasks:
@@ -418,7 +445,6 @@ async def _async_update_lights_for_entry(
                     transition=transition,
                 )
 
-            _record_expected_change(entry_data, hass=hass, light_ids=entity_ids, brightness_pct=None, kelvin=kelvin, transition=transition)
             color_temp_tasks.append(_call_light("turn_on", entity_ids, data))
 
         if color_temp_tasks:

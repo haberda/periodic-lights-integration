@@ -273,14 +273,17 @@ Validation: run `python -m unittest discover -s tests -p "test_runtime*.py"`.
 These unit tests mock the Home Assistant boundary; a live Home Assistant smoke test
 is still recommended before deployment.
 
-## Integration branding
+## Avoiding redundant light commands
 
-Home Assistant 2026.3 and newer automatically loads the bundled icon and logo from
-`custom_components/periodic_lights/brand/`. These are copies of `icon.png` and
-`logo.png` in `assets/images/`; when updating the artwork, update both locations.
-The brand folder ships with the integration for HACS and manual installations.
-After installing the updated integration, restart Home Assistant and refresh the
-browser to see the branding. Earlier Home Assistant versions do not load bundled
-brand images. This affects integration branding, not individual entity icons.
+Periodic updates compare each light's rounded brightness and Kelvin targets with its
+last successfully sent values. Unchanged channels are omitted; if neither channel
+changed, no command is sent. Split updates also skip unchanged channels and do not
+wait for a brightness transition when only temperature needs updating.
 
-See [Home Assistant's brand image documentation](https://developers.home-assistant.io/docs/core/integration/brand_images/).
+Forced updates (including the clear-overrides button) still resend current targets.
+The cache is runtime-only and is cleared by the existing off/on, unavailable,
+disable, and clear-overrides handling. Failed service calls are retried on a later
+update. Successful service execution does not guarantee a physical bulb applied it;
+a forced update can resynchronize it. Turn-off commands retain their existing behavior.
+Skipped updates do not advance the diagnostic last-command timestamp or extend the
+manual-override detection window.
