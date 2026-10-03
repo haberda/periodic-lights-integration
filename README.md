@@ -14,23 +14,6 @@ YAML or file editing required for setup.
 - Set per-light ranges, smooth transitions, and bedtime mode.
 - Preview the daily curve and check each light’s adaptation status.
 
-## Comparison with Adaptive Lighting
-
-Both integrations adapt brightness and color temperature throughout the day.
-
-| Feature | Periodic Lights | Adaptive Lighting |
-| --- | --- | --- |
-| Configuration | Home Assistant UI and entity controls | Home Assistant UI or YAML |
-| Curve shaping | Four curve shapes; optional separate temperature shape and timing | Sun-based color temperature; default, linear, or tanh brightness modes |
-| Timing controls | Solar timing or a fixed daily minimum | Sunrise/sunset overrides, offsets, and earliest/latest limits |
-| Manual adjustments | Pause the light until off/on or **Clear overrides and update** | Configurable takeover, including pausing only the changed channel and optional timed reset |
-| Night mode | Bedtime uses configured minimum brightness and temperature | Sleep mode has separate brightness and color settings |
-| Turn-on adaptation | Responds after the light turns on | Can intercept turn-on commands to include adaptive settings immediately |
-| Redundant commands | Skips channels matching the last successful command; forced updates resend | Optional skipping based on the light’s known state |
-| Diagnostics | Per-light status sensors with targets and last-command timestamps | Switch attributes for targets and manual-control status; manual-control events |
-
-Adaptive Lighting details are based on its [upstream documentation](https://github.com/basnijholt/adaptive-lighting#readme), checked October 3, 2026.
-
 ## Installation
 
 1. Copy `custom_components/periodic_lights/` into your Home Assistant
@@ -64,3 +47,7 @@ See [shaping functions and examples](docs.md#shaping-functions) for the differen
 
 For detailed controls, diagnostics, and update behavior, see the
 [full documentation](docs.md).
+
+## AI use
+
+AI was used to translate the previous AppDaemon app to a custom component. AI was also used to extend the component to include several new features.
