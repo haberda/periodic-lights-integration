@@ -46,7 +46,7 @@ from .const import (
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
 )
-from .light_control import async_update_lights_for_entry, cancel_pending_light_updates
+from .light_control import async_update_lights_for_entry, cancel_pending_light_updates, layered_group_owner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ def _get_brightness_pct_from_state(state) -> int | None:
     """Best-effort brightness percent from HA state (0-255 brightness)."""
     if state is None:
         return None
-    bri = state.attributes.get("brightness")
+    bri = state.attributes.get("layered_lights_control_brightness", state.attributes.get("brightness"))
     if bri is None:
         return None
     try:
@@ -136,6 +136,9 @@ def _get_kelvin_from_state(state) -> int | None:
     """
     if state is None:
         return None
+    if "layered_lights_control_kelvin" in state.attributes:
+        return state.attributes["layered_lights_control_kelvin"]
+
 
     a = state.attributes
 
@@ -421,6 +424,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")
         if new_state is None:
+            return
+
+        if layered_group_owner(hass, state, entity_id):
+            return
+        if new_state.attributes.get("layered_lights_preview_active"):
+            state.get(ATTR_LAST_APPLIED, {}).pop(entity_id, None)
+            return
+        if old_state is not None and old_state.attributes.get("layered_lights_preview_active"):
+            # Restoration has settled: resume without mistaking the restored
+            # state for a manual override or deduplicating away the next update.
+            state.get(ATTR_EXPECTED_CHANGES, {}).pop(entity_id, None)
+            state.get(ATTR_LAST_APPLIED, {}).pop(entity_id, None)
+            hass.async_create_task(async_update_lights_for_entry(hass, entry.entry_id, force=True))
             return
 
         old_on = old_state is not None and old_state.state == "on"

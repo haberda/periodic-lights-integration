@@ -351,7 +351,7 @@ class PeriodicLightsAdaptationSensor(SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_translation_key = "adaptation_status"
-    _attr_options = ["adapting", "light_off", "manually_overridden", "integration_disabled", "controls_disabled", "light_unavailable"]
+    _attr_options = ["adapting", "light_off", "manually_overridden", "integration_disabled", "controls_disabled", "light_unavailable", "controlled_by_group", "group_preview"]
     _attr_icon = "mdi:lightbulb-auto-outline"
 
     def __init__(self, hass, entry_id, setup_name, light_id):

@@ -51,3 +51,17 @@ For detailed controls, diagnostics, and update behavior, see the
 ## AI use
 
 AI was used to translate the previous AppDaemon app to a custom component. AI was also used to extend the component to include several new features.
+## Layered Lights
+
+Select a [Layered Lights](https://github.com/haberda/layered_lights) group as a
+light to adapt. Periodic Lights supplies the daily brightness, Kelvin target, and
+transition; Layered Lights distributes brightness through category and individual
+curves. It retains the usual behavior of adapting only groups that are on.
+
+If an area selection includes both a group and its physical members, member
+commands are suppressed while the group is selected, including across Periodic
+Lights entries. Their status is `controlled_by_group`. During a Layered Lights
+editor preview the group reports `group_preview`; adaptation resumes after
+restoration. Manual adjustments to the group still use normal override detection.
+Configure manual overrides at group level; physical-member adjustments are not
+independent Periodic Lights overrides when their group owns control.

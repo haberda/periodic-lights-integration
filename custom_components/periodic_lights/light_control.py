@@ -134,13 +134,13 @@ def _record_expected_change(
     for lid in light_ids:
         state = hass.states.get(lid)
         attrs = state.attributes if state is not None else {}
-        brightness = attrs.get("brightness")
+        brightness = attrs.get("layered_lights_control_brightness", attrs.get("brightness"))
         previous = expected_map.get(lid, {})
         if previous.get("until", 0) < now_ts:
             previous = {}
         expected_map[lid] = {
             "start_brightness_pct": round(brightness / 255 * 100) if brightness is not None else None,
-            "start_kelvin": attrs.get("color_temp_kelvin"),
+            "start_kelvin": attrs.get("layered_lights_control_kelvin", attrs.get("color_temp_kelvin")),
             "until": until,
             "brightness_pct": brightness_pct if brightness_pct is not None else previous.get("brightness_pct"),
             "color_temp_kelvin": kelvin if kelvin is not None else previous.get("color_temp_kelvin"),
@@ -148,9 +148,29 @@ def _record_expected_change(
         }
 
 
+def layered_group_owner(hass: HomeAssistant, data: dict[str, Any], light_id: str) -> str | None:
+    """A selected virtual group owns its members, including across PL entries."""
+    entries = [data, *hass.data.get(DOMAIN, {}).values()]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for group_id in entry.get(CONF_LIGHTS, []):
+            if group_id == light_id:
+                continue
+            group = hass.states.get(group_id)
+            members = group.attributes.get("layered_lights_members", []) if group else []
+            if isinstance(members, (list, tuple)) and light_id in members:
+                return group_id
+    return None
+
+
 def light_adaptation_status(hass: HomeAssistant, data: dict[str, Any], light_id: str) -> str:
     """Return the same eligibility reason used by control and diagnostics."""
     state = hass.states.get(light_id)
+    if layered_group_owner(hass, data, light_id):
+        return "controlled_by_group"
+    if state is not None and state.attributes.get("layered_lights_preview_active"):
+        return "group_preview"
     if state is None or state.state in ("unknown", "unavailable"):
         return "light_unavailable"
     if state.state != "on":
