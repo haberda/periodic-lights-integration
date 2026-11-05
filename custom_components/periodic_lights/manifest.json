@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "documentation": "https://github.com/haberda/periodic-lights-integration",
   "requirements": [
-    "Pillow==12.3.0"
+    "Pillow>=12.3.0"
   ],
   "codeowners": [
     "@haberda"

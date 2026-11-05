@@ -204,3 +204,24 @@ python -m unittest discover -s tests -p "test_runtime*.py"
 
 These tests mock the Home Assistant boundary. Use a live Home Assistant installation
 to verify behavior before deployment.
+
+### Dependency compatibility
+
+Pillow is the integration's only declared third-party runtime requirement. The
+manifest permits `Pillow>=12.3.0` so Home Assistant's package constraints can select
+its supported version instead of conflicting with an integration-specific pin.
+Home Assistant 2026.11.0 requires Pillow 13.0.0; preview rendering and the runtime
+unit suite have been checked with both 12.3.0 and 13.0.0.
+
+Home Assistant provides its own APIs and schema validation. Keep the existing
+`voluptuous` import: on Home Assistant 2026.11 it resolves to Probatio through
+Home Assistant's compatibility alias. Do not add a separate Voluptuous pin.
+Matplotlib is only needed for the optional `tests/test_curve_script.py` plotting
+utility, not for integration startup or the runtime test suite.
+
+When updating dependencies, compare against the target Home Assistant release's
+[package constraints](https://github.com/home-assistant/core/blob/2026.11.0/homeassistant/package_constraints.txt)
+and [startup compatibility aliases](https://github.com/home-assistant/core/blob/2026.11.0/homeassistant/__init__.py).
+Test in an isolated environment rather than replacing packages in Home Assistant's
+managed installation. These unit tests mock Home Assistant; they do not replace a
+live startup check.
