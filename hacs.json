@@ -3,6 +3,5 @@
   "content_in_root": false,
   "country": "US",
   "homeassistant": "2026.8.0",
-  "iot_class": "calculated",
   "render_readme": true
 }

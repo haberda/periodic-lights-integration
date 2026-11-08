@@ -14,7 +14,6 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
-from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     DOMAIN,
@@ -193,11 +192,6 @@ def _logbook_overridden(hass: HomeAssistant, *, setup_name: str, light_id: str) 
         domain=DOMAIN,
         entity_id=light_id,
     )
-
-
-async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up Periodic Lights from YAML (unused)."""
-    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

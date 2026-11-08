@@ -210,16 +210,17 @@ ruff error checks on every push and pull request to `main`, and weekly so that a
 Home Assistant release that breaks the manifest shows up without a code change.
 
 The minimum Home Assistant version in `hacs.json` (2026.8.0) is the first release
-whose package constraints include Pillow 12.3.0. Raise it if the Pillow floor in
-`manifest.json` goes up.
+whose package constraints include Pillow 12.3.0, the oldest Pillow the preview has
+been tested with.
 
 ### Dependency compatibility
 
-Pillow is the integration's only declared third-party runtime requirement. The
-manifest permits `Pillow>=12.3.0` so Home Assistant's package constraints can select
-its supported version instead of conflicting with an integration-specific pin.
-Home Assistant 2026.11.0 requires Pillow 13.0.0; preview rendering and the runtime
-unit suite have been checked with both 12.3.0 and 13.0.0.
+Pillow is the only third-party package the integration uses. Home Assistant ships
+it, and hassfest rejects custom integrations that list Home Assistant's own
+dependencies, so `manifest.json` has no requirements. The Pillow version therefore
+comes from the Home Assistant release, which is why `hacs.json` sets the minimum
+release. Home Assistant 2026.11.0 requires Pillow 13.0.0; preview rendering and the
+runtime unit suite have been checked with both 12.3.0 and 13.0.0.
 
 Home Assistant provides its own APIs and schema validation. Keep the existing
 `voluptuous` import: on Home Assistant 2026.11 it resolves to Probatio through

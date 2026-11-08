@@ -79,7 +79,8 @@ git diff --check
 
 `tests/runtime_support.py` loads production modules against a minimal mocked Home
 Assistant boundary. Extend the mocks when new API boundaries are needed. Preview
-tests require Pillow; the runtime dependency is declared in `manifest.json`.
+tests require Pillow. Home Assistant ships Pillow, so `manifest.json` must not list it;
+hassfest rejects requirements that Home Assistant already provides.
 Passing these tests does not establish live Home Assistant compatibility. Report
 that distinction and any checks you could not run.
 
