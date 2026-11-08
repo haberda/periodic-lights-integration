@@ -1,6 +1,6 @@
 """Render the configured local-day schedule without touching light services."""
 
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta
 from io import BytesIO
 from textwrap import wrap
 
@@ -12,8 +12,8 @@ from .curve_model import curve_at
 def sample_day(settings, now, cycle):
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
-    at = start.astimezone(timezone.utc)
-    finish = end.astimezone(timezone.utc)
+    at = start.astimezone(UTC)
+    finish = end.astimezone(UTC)
     points = []
     while at <= finish:
         local = at.astimezone(now.tzinfo)

@@ -12,7 +12,9 @@ All integration code lives in `custom_components/periodic_lights/`:
 
 - `__init__.py`: config-entry lifecycle, runtime state, scheduling, light listeners,
   and manual override detection.
-- `config_flow.py`: setup/options UI, light selection, and area resolution.
+- `config_flow.py`: setup/options UI.
+- `light_selection.py`: on/off-only filtering, area lookup, and resolving an entry's
+  manual and area lights. Shared by setup, the registry refresh, and the config flow.
 - `light_control.py`: eligibility, per-light targets, batching, split commands,
   redundant-command suppression, and Layered Lights ownership.
 - `curve_math.py`, `solar_curve.py`, `curve_model.py`: shaping functions, solar
@@ -77,7 +79,8 @@ git diff --check
 
 `tests/runtime_support.py` loads production modules against a minimal mocked Home
 Assistant boundary. Extend the mocks when new API boundaries are needed. Preview
-tests require Pillow; the runtime dependency is declared in `manifest.json`.
+tests require Pillow. Home Assistant ships Pillow, so `manifest.json` must not list it;
+hassfest rejects requirements that Home Assistant already provides.
 Passing these tests does not establish live Home Assistant compatibility. Report
 that distinction and any checks you could not run.
 
@@ -88,6 +91,12 @@ integration calculations rather than relying on the plot script.
 For preview changes, also render and inspect a sample PNG. For documentation-only
 changes, check local links, heading anchors, image paths, and whitespace; a full
 runtime test run is unnecessary.
+
+## Writing style
+
+If the humanizer skill is installed, always use it for documentation you write or
+edit in this repository and for communication with the user in the console,
+including summaries, reports, and review findings.
 
 ## Documentation
 

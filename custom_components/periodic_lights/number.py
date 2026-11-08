@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
+    ATTR_RESCHEDULE_LIGHT_UPDATES,
     DOMAIN,
     MANUFACTURER,
     CONF_NAME,
@@ -131,7 +132,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         if data is not None:
             data[self._key] = value
             if self._key == CONF_UPDATE_INTERVAL:
-                reschedule = data.get("pl_reschedule_light_updates")
+                reschedule = data.get(ATTR_RESCHEDULE_LIGHT_UPDATES)
                 if reschedule is not None:
                     reschedule()
 
@@ -145,7 +146,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         if data is not None:
             data[self._key] = value
             if self._key == CONF_UPDATE_INTERVAL:
-                reschedule = data.get("pl_reschedule_light_updates")
+                reschedule = data.get(ATTR_RESCHEDULE_LIGHT_UPDATES)
                 if reschedule is not None:
                     reschedule()
 

@@ -19,7 +19,7 @@ All parameters are accessible through the built-in config flow and the entities 
 | Parameter | Description |
 |----------|-------------|
 | **Setup Name** | A friendly name for the lighting setup. |
-| **Choose Area (optional)** | Allows selecting an HA Area; lights in that area are automatically added. Note, this only happens once upon configuration. To update area lights you can reconfigure the device after the fact. |
+| **Choose Area (optional)** | Allows selecting an HA Area; lights in that area are automatically added. Area membership is re-checked a couple of seconds after lights or devices are added, removed, or moved between areas, so no reconfiguration is needed. |
 | **Use Hidden Lights in Configured Area** | Includes hidden light entities in the area scan. |
 | **Choose Lights (optional)** | Manually select individual lights. |
 | **Minimum Brightness (%)** | Lowest brightness curve value. |
@@ -28,6 +28,7 @@ All parameters are accessible through the built-in config flow and the entities 
 | **Maximum Color Temperature (K)** | Coolest kelvin. |
 | **Update Interval (s)** | How often to push updates to lights. |
 | **Transition Time (s)** | How long lights fade when updated. |
+| **Debounce Delay (s)** | How long to wait after a light turns on before adapting. Lights that turn on within this window (for example, from a scene) are adapted together in one update. Default 0.3 s; 0 adapts each light immediately. |
 
 ### Controls and entities
 
@@ -205,13 +206,22 @@ python -m unittest discover -s tests -p "test_runtime*.py"
 These tests mock the Home Assistant boundary. Use a live Home Assistant installation
 to verify behavior before deployment.
 
+The `Validate` GitHub workflow runs hassfest, HACS validation, these tests, and the
+ruff error checks on every push and pull request to `main`, and weekly so that a new
+Home Assistant release that breaks the manifest shows up without a code change.
+
+The minimum Home Assistant version in `hacs.json` (2026.8.0) is the first release
+whose package constraints include Pillow 12.3.0, the oldest Pillow the preview has
+been tested with.
+
 ### Dependency compatibility
 
-Pillow is the integration's only declared third-party runtime requirement. The
-manifest permits `Pillow>=12.3.0` so Home Assistant's package constraints can select
-its supported version instead of conflicting with an integration-specific pin.
-Home Assistant 2026.11.0 requires Pillow 13.0.0; preview rendering and the runtime
-unit suite have been checked with both 12.3.0 and 13.0.0.
+Pillow is the only third-party package the integration uses. Home Assistant ships
+it, and hassfest rejects custom integrations that list Home Assistant's own
+dependencies, so `manifest.json` has no requirements. The Pillow version therefore
+comes from the Home Assistant release, which is why `hacs.json` sets the minimum
+release. Home Assistant 2026.11.0 requires Pillow 13.0.0; preview rendering and the
+runtime unit suite have been checked with both 12.3.0 and 13.0.0.
 
 Home Assistant provides its own APIs and schema validation. Keep the existing
 `voluptuous` import: on Home Assistant 2026.11 it resolves to Probatio through

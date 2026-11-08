@@ -171,7 +171,7 @@ class SchedulingTests(unittest.IsolatedAsyncioTestCase):
 class AreaSelectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_entity_area_overrides_device_area(self):
         runtime = load_runtime()
-        flow = runtime.package.config_flow
+        flow = runtime.package.light_selection
         entities = {
             name: SimpleNamespace(entity_id=name, domain='light', area_id=area,
                                   device_id='device', hidden_by=hidden)

@@ -14,18 +14,20 @@
           "min_kelvin": "Minimum color temperature (K)",
           "max_kelvin": "Maximum color temperature (K)",
           "update_interval": "Update interval (seconds)",
-          "transition": "Transition time (seconds)"
+          "transition": "Transition time (seconds)",
+          "debounce_delay": "Debounce delay (seconds)"
         }
       }
     },
     "error": {
-      "no_lights": "No lights were found. Choose an area and/or lights.",
+      "no_lights": "No lights to control. Select lights or an area that contains lights. Lights that only support on/off can't be adapted and are skipped.",
       "brightness_out_of_range": "Brightness must be between 0 and 100%.",
-      "min_brightness_greater_than_max": "Minimum brightness cannot be greater than maximum.",
+      "min_brightness_greater_than_max": "Minimum brightness cannot be greater than maximum brightness.",
       "kelvin_out_of_range": "Color temperature must be between 1500 K and 6500 K.",
-      "min_kelvin_greater_than_max": "Minimum color temperature cannot be greater than maximum.",
+      "min_kelvin_greater_than_max": "Minimum color temperature cannot be greater than maximum color temperature.",
       "interval_out_of_range": "Update interval must be between 10 and 3600 seconds.",
-      "transition_out_of_range": "Transition time must be within the allowed range."
+      "transition_out_of_range": "Transition time must be between 0 and 600 seconds.",
+      "debounce_out_of_range": "Debounce delay must be between 0 and 5 seconds."
     }
   },
   "options": {
@@ -41,7 +43,7 @@
       }
     },
     "error": {
-      "no_lights": "No lights were found. Choose an area and/or lights."
+      "no_lights": "No lights to control. Select lights or an area that contains lights. Lights that only support on/off can't be adapted and are skipped."
     }
   },
   "entity": {
