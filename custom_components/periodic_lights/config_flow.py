@@ -181,7 +181,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     {"number": {"min": 10, "max": 3600, "step": 10, "mode": "box", "unit_of_measurement": "s"}}
                 ),
                 vol.Required(CONF_TRANSITION, default=DEFAULT_TRANSITION): selector.selector(
-                    {"number": {"min": 0, "max": 60, "step": 1, "mode": "box", "unit_of_measurement": "s"}}
+                    {"number": {"min": 0, "max": 600, "step": 1, "mode": "box", "unit_of_measurement": "s"}}
                 ),
                 vol.Required(CONF_DEBOUNCE_DELAY, default=DEFAULT_DEBOUNCE_DELAY): selector.selector(
                     {"number": {"min": 0, "max": 5, "step": 0.1, "mode": "box", "unit_of_measurement": "s"}}
