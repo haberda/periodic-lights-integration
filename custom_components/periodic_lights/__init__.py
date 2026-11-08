@@ -10,6 +10,8 @@ from homeassistant.components import logbook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
@@ -45,72 +47,22 @@ from .const import (
     DEFAULT_SHAPING_PARAM,
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
+    ATTR_LIGHT_ON_LISTENER,
+    ATTR_OVERRIDDEN_LIGHTS,
+    ATTR_EXPECTED_CHANGES,
+    ATTR_LAST_APPLIED,
+    ATTR_CONTROLLED_LIGHTS,
+    ATTR_OVERRIDE_DETECTION_READY,
+    ATTR_RESCHEDULE_LIGHT_UPDATES,
+    ATTR_STOP_LIGHT_UPDATES,
 )
+from .light_selection import async_resolve_entry_lights, entry_area_id, entry_use_hidden, get_effective
 from .light_control import async_update_lights_for_entry, cancel_pending_light_updates, layered_group_owner
 
 _LOGGER = logging.getLogger(__name__)
 
-ATTR_LIGHT_ON_LISTENER = "light_on_listener"
-
-# Must match config_flow.py
-OPT_MANUAL_LIGHTS = "manual_lights"
-
-# If your options flow stores a sentinel for "cleared"
-AREA_CLEARED = "__cleared__"
-
-# ---- Manual override tracking keys (runtime only; stored in hass.data[DOMAIN][entry_id]) ----
-ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"  # set[str]
-ATTR_EXPECTED_CHANGES = "pl_expected_changes"  # dict[light_id, dict[str, Any]]
-ATTR_LAST_APPLIED = "pl_last_applied"  # dict[light_id, dict[str, Any]]
-
-# ---- Control tracking for logbook (runtime only) ----
-ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # set[str]
-
-# ---- Override detection gating (runtime only) ----
-ATTR_OVERRIDE_DETECTION_READY = "pl_override_detection_ready"  # bool
-
-
-def _normalize_area_value(value):
-    """Normalize stored area values. Treat sentinel as cleared."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        s = value.strip()
-        if not s or s == AREA_CLEARED:
-            return None
-        return s
-    return None
-
-
-def _get_effective(entry: ConfigEntry, key: str, default):
-    """Options override data."""
-    if key in entry.options:
-        return entry.options.get(key)
-    return entry.data.get(key, default)
-
-
-def _is_onoff_only_light(hass: HomeAssistant, entity_id: str) -> bool:
-    """Return True if we can confidently determine the light is on/off only."""
-    state = hass.states.get(entity_id)
-    if state is None:
-        return False
-
-    modes = state.attributes.get("supported_color_modes")
-    if not modes:
-        return False
-
-    modes_set = {str(m).lower() for m in modes}
-    return modes_set == {"onoff"}
-
-
-def _filter_configurable_lights(hass: HomeAssistant, entity_ids: list[str]) -> list[str]:
-    """Silent filter: remove on/off-only lights."""
-    kept: list[str] = []
-    for eid in entity_ids:
-        if _is_onoff_only_light(hass, eid):
-            continue
-        kept.append(eid)
-    return sorted(set(kept))
+# Seconds to wait after a registry change before re-resolving area lights
+REGISTRY_REFRESH_DELAY = 2
 
 
 def _get_brightness_pct_from_state(state) -> int | None:
@@ -124,7 +76,7 @@ def _get_brightness_pct_from_state(state) -> int | None:
         bri_i = int(bri)
     except (TypeError, ValueError):
         return None
-    return int(round((bri_i / 255.0) * 100.0))
+    return round((bri_i / 255.0) * 100.0)
 
 
 def _get_kelvin_from_state(state) -> int | None:
@@ -136,16 +88,12 @@ def _get_kelvin_from_state(state) -> int | None:
     """
     if state is None:
         return None
-    if "layered_lights_control_kelvin" in state.attributes:
-        return state.attributes["layered_lights_control_kelvin"]
-
-
     a = state.attributes
 
-    k = a.get("color_temp_kelvin")
+    k = a.get("layered_lights_control_kelvin", a.get("color_temp_kelvin"))
     if k is not None:
         try:
-            return int(round(float(k)))
+            return round(float(k))
         except (TypeError, ValueError):
             return None
 
@@ -156,7 +104,7 @@ def _get_kelvin_from_state(state) -> int | None:
         m = float(mired)
         if m <= 0:
             return None
-        return int(round(1_000_000.0 / m))
+        return round(1_000_000.0 / m)
     except (TypeError, ValueError):
         return None
 
@@ -269,37 +217,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # IMPORTANT: match what switch.py listens for
         async_dispatcher_send(hass, f"{SIGNAL_REFRESH_ENTITIES}_{entry.entry_id}")
 
-    # ---- Effective config values (options override data) ----
-    area_val = _normalize_area_value(_get_effective(entry, CONF_AREA_ID, None))
-    use_hidden = bool(_get_effective(entry, CONF_USE_HIDDEN, False))
-
-    if OPT_MANUAL_LIGHTS in entry.options:
-        manual_val = entry.options.get(OPT_MANUAL_LIGHTS)
-    elif OPT_MANUAL_LIGHTS in entry.data:
-        manual_val = entry.data.get(OPT_MANUAL_LIGHTS)
-    else:
-        manual_val = _get_effective(entry, CONF_LIGHTS, [])
-
-    manual_lights = _filter_configurable_lights(hass, list(manual_val or []))
-
-    area_lights: list[str] = []
-    if area_val:
-        from .config_flow import async_get_lights_in_area  # avoid import cycle
-        area_raw = await async_get_lights_in_area(hass, area_val, include_hidden=use_hidden)
-        area_lights = _filter_configurable_lights(hass, area_raw)
-
-    effective_lights = sorted(set(manual_lights) | set(area_lights))
+    area_val = entry_area_id(entry)
+    use_hidden = entry_use_hidden(entry)
+    effective_lights = await async_resolve_entry_lights(hass, entry)
 
     entry_state: dict[str, Any] = {
         CONF_AREA_ID: area_val,
         CONF_USE_HIDDEN: use_hidden,
         CONF_LIGHTS: effective_lights,
-        CONF_MIN_BRIGHTNESS: _get_effective(entry, CONF_MIN_BRIGHTNESS, 0),
-        CONF_MAX_BRIGHTNESS: _get_effective(entry, CONF_MAX_BRIGHTNESS, 100),
-        CONF_MIN_KELVIN: _get_effective(entry, CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN),
-        CONF_MAX_KELVIN: _get_effective(entry, CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN),
-        CONF_UPDATE_INTERVAL: _get_effective(entry, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-        CONF_TRANSITION: _get_effective(entry, CONF_TRANSITION, DEFAULT_TRANSITION),
+        CONF_MIN_BRIGHTNESS: get_effective(entry, CONF_MIN_BRIGHTNESS, 0),
+        CONF_MAX_BRIGHTNESS: get_effective(entry, CONF_MAX_BRIGHTNESS, 100),
+        CONF_MIN_KELVIN: get_effective(entry, CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN),
+        CONF_MAX_KELVIN: get_effective(entry, CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN),
+        CONF_UPDATE_INTERVAL: get_effective(entry, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+        CONF_TRANSITION: get_effective(entry, CONF_TRANSITION, DEFAULT_TRANSITION),
         ATTR_ENABLED: True,
         ATTR_BRIGHTNESS_ENABLED: True,
         ATTR_COLOR_TEMP_ENABLED: True,
@@ -507,8 +438,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, _periodic_update, timedelta(seconds=interval)
         )
 
-    entry_state["pl_reschedule_light_updates"] = _reschedule_light_updates
-    entry_state["pl_stop_light_updates"] = _stop_update_timer
+    entry_state[ATTR_RESCHEDULE_LIGHT_UPDATES] = _reschedule_light_updates
+    entry_state[ATTR_STOP_LIGHT_UPDATES] = _stop_update_timer
     entry.async_on_unload(_stop_update_timer)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -516,27 +447,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
     # ---- Post-start refresh: area may be incomplete during early startup ----
-    async def _recompute_effective_lights() -> list[str]:
-        area_val2 = _normalize_area_value(_get_effective(entry, CONF_AREA_ID, None))
-        use_hidden2 = bool(_get_effective(entry, CONF_USE_HIDDEN, False))
-
-        if OPT_MANUAL_LIGHTS in entry.options:
-            manual_val2 = entry.options.get(OPT_MANUAL_LIGHTS)
-        elif OPT_MANUAL_LIGHTS in entry.data:
-            manual_val2 = entry.data.get(OPT_MANUAL_LIGHTS)
-        else:
-            manual_val2 = _get_effective(entry, CONF_LIGHTS, [])
-
-        manual2 = _filter_configurable_lights(hass, list(manual_val2 or []))
-
-        area2: list[str] = []
-        if area_val2:
-            from .config_flow import async_get_lights_in_area
-            area_raw2 = await async_get_lights_in_area(hass, area_val2, include_hidden=use_hidden2)
-            area2 = _filter_configurable_lights(hass, area_raw2)
-
-        return sorted(set(manual2) | set(area2))
-
     def _apply_effective_lights(new_lights: list[str]) -> None:
         st = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         if not st:
@@ -569,7 +479,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _do_poststart_refresh(_now=None) -> None:
         try:
-            new_lights = await _recompute_effective_lights()
+            new_lights = await async_resolve_entry_lights(hass, entry)
             _apply_effective_lights(new_lights)
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Periodic Lights POSTSTART REFRESH failed | entry_id=%s", entry.entry_id)
@@ -585,6 +495,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
 
+    # ---- Keep area membership current when registries change ----
+    if area_val:
+        cancel_registry_refresh = None
+
+        @callback
+        def _registry_refresh_fired(_now=None) -> None:
+            nonlocal cancel_registry_refresh
+            cancel_registry_refresh = None
+            hass.async_create_task(_do_poststart_refresh())
+
+        @callback
+        def _schedule_registry_refresh() -> None:
+            # Registry edits often arrive in bursts; resolve the area once.
+            nonlocal cancel_registry_refresh
+            if cancel_registry_refresh is not None:
+                cancel_registry_refresh()
+            cancel_registry_refresh = async_call_later(hass, REGISTRY_REFRESH_DELAY, _registry_refresh_fired)
+
+        @callback
+        def _cancel_registry_refresh() -> None:
+            if cancel_registry_refresh is not None:
+                cancel_registry_refresh()
+
+        @callback
+        def _on_entity_registry_updated(event) -> None:
+            if str(event.data.get("entity_id", "")).startswith("light."):
+                _schedule_registry_refresh()
+
+        @callback
+        def _on_device_registry_updated(event) -> None:
+            data = event.data
+            if data.get("action") != "update" or "area_id" in (data.get("changes") or {}):
+                _schedule_registry_refresh()
+
+        entry.async_on_unload(
+            hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _on_entity_registry_updated)
+        )
+        entry.async_on_unload(
+            hass.bus.async_listen(dr.EVENT_DEVICE_REGISTRY_UPDATED, _on_device_registry_updated)
+        )
+        entry.async_on_unload(_cancel_registry_refresh)
+
     # Initial refresh so attributes populate quickly after platform add
     _notify_entry_state_changed()
 
@@ -596,7 +548,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_state = hass.data[DOMAIN].get(entry.entry_id)
     if entry_state:
         cancel_pending_light_updates(entry_state)
-        entry_state["pl_stop_light_updates"]()
+        entry_state[ATTR_STOP_LIGHT_UPDATES]()
         # Unsubscribe global on/off listener
         unsub = entry_state.get(ATTR_LIGHT_ON_LISTENER)
         if unsub is not None:

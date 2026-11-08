@@ -32,6 +32,21 @@ ATTR_TRANSITION_ON_TURN_ON = "transition_on_turn_on"
 ATTR_LIGHT_ON_LISTENER = "light_on_listener"  # Listener unsubscribe function
 ATTR_RESUBSCRIBE_FN = "resubscribe_fn"  # Function to re-enable listener after our updates
 
+# Runtime-only state for manual override tracking and command deduplication
+ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"  # set[str]
+ATTR_EXPECTED_CHANGES = "pl_expected_changes"  # dict[light_id, dict[str, Any]]
+ATTR_LAST_APPLIED = "pl_last_applied"  # dict[light_id, dict[str, Any]]
+ATTR_LAST_COMMAND_SENT = "pl_last_command_sent"  # dict[light_id, dict[str, Any]]
+ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # set[str], logbook gating
+ATTR_OVERRIDE_DETECTION_READY = "pl_override_detection_ready"  # bool
+ATTR_UPDATE_TASKS = "pl_update_tasks"  # set[asyncio.Task]
+ATTR_RESCHEDULE_LIGHT_UPDATES = "pl_reschedule_light_updates"  # callback
+ATTR_STOP_LIGHT_UPDATES = "pl_stop_light_updates"  # callback
+
+# Stored options: the user's explicit light list and the "area cleared" sentinel
+OPT_MANUAL_LIGHTS = "manual_lights"
+AREA_CLEARED = "__cleared__"
+
 #  Fixed-minimum-time controls
 ATTR_USE_FIXED_MIN_TIME = "use_fixed_min_time"   # bool
 ATTR_FIXED_MIN_TIME = "fixed_min_time"           # seconds since midnight (float)

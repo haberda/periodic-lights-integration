@@ -19,7 +19,7 @@ All parameters are accessible through the built-in config flow and the entities 
 | Parameter | Description |
 |----------|-------------|
 | **Setup Name** | A friendly name for the lighting setup. |
-| **Choose Area (optional)** | Allows selecting an HA Area; lights in that area are automatically added. Note, this only happens once upon configuration. To update area lights you can reconfigure the device after the fact. |
+| **Choose Area (optional)** | Allows selecting an HA Area; lights in that area are automatically added. Area membership is re-checked a couple of seconds after lights or devices are added, removed, or moved between areas, so no reconfiguration is needed. |
 | **Use Hidden Lights in Configured Area** | Includes hidden light entities in the area scan. |
 | **Choose Lights (optional)** | Manually select individual lights. |
 | **Minimum Brightness (%)** | Lowest brightness curve value. |
@@ -204,6 +204,14 @@ python -m unittest discover -s tests -p "test_runtime*.py"
 
 These tests mock the Home Assistant boundary. Use a live Home Assistant installation
 to verify behavior before deployment.
+
+The `Validate` GitHub workflow runs hassfest, HACS validation, these tests, and the
+ruff error checks on every push and pull request to `main`, and weekly so that a new
+Home Assistant release that breaks the manifest shows up without a code change.
+
+The minimum Home Assistant version in `hacs.json` (2026.8.0) is the first release
+whose package constraints include Pillow 12.3.0. Raise it if the Pillow floor in
+`manifest.json` goes up.
 
 ### Dependency compatibility
 

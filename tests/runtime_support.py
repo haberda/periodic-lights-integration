@@ -54,8 +54,8 @@ def load_runtime():
     module('homeassistant.const', EVENT_HOMEASSISTANT_STARTED='started')
     module('homeassistant.helpers')
     module('homeassistant.helpers.selector')
-    module('homeassistant.helpers.device_registry', async_get=Mock())
-    module('homeassistant.helpers.entity_registry', async_get=Mock())
+    module('homeassistant.helpers.device_registry', async_get=Mock(), EVENT_DEVICE_REGISTRY_UPDATED='device_registry_updated')
+    module('homeassistant.helpers.entity_registry', async_get=Mock(), EVENT_ENTITY_REGISTRY_UPDATED='entity_registry_updated')
     module('homeassistant.helpers.dispatcher', async_dispatcher_send=Mock(), async_dispatcher_connect=Mock())
     module('homeassistant.helpers.event', async_call_later=Mock(), async_track_state_change_event=Mock(), async_track_time_interval=Mock())
     module('homeassistant.helpers.typing', ConfigType=dict)
@@ -63,7 +63,7 @@ def load_runtime():
     module('homeassistant.util.dt', utcnow=lambda: datetime.now(timezone.utc), as_local=lambda dt: dt)
     package = module('review_periodic_lights', __path__=[str(ROOT)])
     with patch.dict(sys.modules, modules):
-        for name in ('const', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'light_control', 'temperature_entities', 'number', 'config_flow', 'sensor', 'switch', 'select', 'time', 'preview', 'image'):
+        for name in ('const', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'light_control', 'temperature_entities', 'number', 'light_selection', 'config_flow', 'sensor', 'switch', 'select', 'time', 'preview', 'image'):
             spec = importlib.util.spec_from_file_location(f'{package.__name__}.{name}', ROOT / f'{name}.py')
             loaded = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = loaded

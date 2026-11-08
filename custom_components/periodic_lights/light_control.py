@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
 from typing import Any
 
 from homeassistant.components import logbook
@@ -11,6 +10,11 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ATTR_OVERRIDDEN_LIGHTS,
+    ATTR_EXPECTED_CHANGES,
+    ATTR_LAST_APPLIED,
+    ATTR_LAST_COMMAND_SENT,
+    ATTR_UPDATE_TASKS,
     DOMAIN,
     CONF_LIGHTS,
     CONF_MIN_BRIGHTNESS,
@@ -27,8 +31,6 @@ from .const import (
     ATTR_LAST_LIGHT_UPDATE,
     ATTR_SHAPING_PARAM,
     ATTR_SHAPING_FUNCTION,
-    ATTR_USE_FIXED_MIN_TIME,
-    ATTR_FIXED_MIN_TIME,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
@@ -39,19 +41,14 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
     SIGNAL_REFRESH_ENTITIES,
 )
-from .solar_curve import daily_pct, map_pct_to_range, apply_shaping
+from .curve_math import apply_shaping, map_pct_to_range
+from .solar_curve import daily_pct
 
 from .curve_model import curve_at
 
 from .temperature_curve import temperature_curve_settings
 
 _LOGGER = logging.getLogger(__name__)
-
-# Must match __init__.py runtime keys
-ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"
-ATTR_EXPECTED_CHANGES = "pl_expected_changes"
-ATTR_LAST_APPLIED = "pl_last_applied"
-
 
 def _compute_phase_with_optional_override(hass, entry_data):
     _, cycle = daily_pct(hass)
@@ -112,6 +109,14 @@ def _log_action(
     )
 
 
+def _as_number(value: Any) -> float | None:
+    """Return a numeric state attribute, or None if it is missing or malformed."""
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _record_expected_change(
     entry_data: dict[str, Any],
     *,
@@ -134,13 +139,14 @@ def _record_expected_change(
     for lid in light_ids:
         state = hass.states.get(lid)
         attrs = state.attributes if state is not None else {}
-        brightness = attrs.get("layered_lights_control_brightness", attrs.get("brightness"))
+        brightness = _as_number(attrs.get("layered_lights_control_brightness", attrs.get("brightness")))
+        kelvin_now = _as_number(attrs.get("layered_lights_control_kelvin", attrs.get("color_temp_kelvin")))
         previous = expected_map.get(lid, {})
         if previous.get("until", 0) < now_ts:
             previous = {}
         expected_map[lid] = {
             "start_brightness_pct": round(brightness / 255 * 100) if brightness is not None else None,
-            "start_kelvin": attrs.get("layered_lights_control_kelvin", attrs.get("color_temp_kelvin")),
+            "start_kelvin": round(kelvin_now) if kelvin_now is not None else None,
             "until": until,
             "brightness_pct": brightness_pct if brightness_pct is not None else previous.get("brightness_pct"),
             "color_temp_kelvin": kelvin if kelvin is not None else previous.get("color_temp_kelvin"),
@@ -206,7 +212,7 @@ def light_targets(data: dict[str, Any], light_id: str, shaped: float, temperatur
 
 def cancel_pending_light_updates(entry_data: dict[str, Any]) -> None:
     """Cancel entry-owned updates, including a delayed split color step."""
-    for task in tuple(entry_data.get("pl_update_tasks", ())):
+    for task in tuple(entry_data.get(ATTR_UPDATE_TASKS, ())):
         task.cancel()
 
 
@@ -217,7 +223,7 @@ async def async_update_lights_for_entry(
     entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
     if entry_data is None:
         return
-    tasks = entry_data.setdefault("pl_update_tasks", set())
+    tasks = entry_data.setdefault(ATTR_UPDATE_TASKS, set())
     # A long split transition must finish before another periodic update starts.
     if tasks and not force:
         return
@@ -343,7 +349,7 @@ async def _async_update_lights_for_entry(
                 last.update({key: data[key] for key in ("brightness_pct", "color_temp_kelvin") if key in data})
         sent = dt_util.utcnow().isoformat()
         for lid in eligible:
-            entry_data.setdefault("pl_last_command_sent", {})[lid] = sent
+            entry_data.setdefault(ATTR_LAST_COMMAND_SENT, {})[lid] = sent
         async_dispatcher_send(hass, f"{SIGNAL_REFRESH_ENTITIES}_{entry_id}")
 
     # Handle turn_off commands

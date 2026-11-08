@@ -14,6 +14,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ATTR_LAST_COMMAND_SENT,
     DOMAIN,
     CONF_LIGHTS,
     SIGNAL_REFRESH_ENTITIES,
@@ -28,8 +29,6 @@ from .const import (
     ATTR_COLOR_TEMP_ENABLED,
     ATTR_SHAPING_PARAM,
     ATTR_SHAPING_FUNCTION,
-    ATTR_USE_FIXED_MIN_TIME,
-    ATTR_FIXED_MIN_TIME,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_MIN_KELVIN,
@@ -38,7 +37,8 @@ from .const import (
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_UPDATE_SENSORS,
 )
-from .solar_curve import daily_pct, map_pct_to_range, SolarCycle, apply_shaping
+from .curve_math import apply_shaping, map_pct_to_range
+from .solar_curve import SolarCycle, daily_pct
 
 from .curve_model import curve_at
 
@@ -174,11 +174,10 @@ class _BasePeriodicSensor(SensorEntity):
             if not self._updates_enabled():
                 return
             self._recalculate()
-        except Exception as err:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             _LOGGER.exception(
-                "Error recalculating Periodic Lights sensor (%s): %s",
+                "Error recalculating Periodic Lights sensor (%s)",
                 self.entity_id,
-                err,
             )
             # Fallback: leave previous value
 
@@ -396,7 +395,7 @@ class PeriodicLightsAdaptationSensor(SensorEntity):
             "light": self._light_id,
             "target_brightness_pct": brightness,
             "target_color_temp_kelvin": kelvin,
-            "last_command_sent": data.get("pl_last_command_sent", {}).get(self._light_id),
+            "last_command_sent": data.get(ATTR_LAST_COMMAND_SENT, {}).get(self._light_id),
             "brightness_control": bool(data.get(ATTR_BRIGHTNESS_ENABLED, True)),
             "color_temperature_control": bool(data.get(ATTR_COLOR_TEMP_ENABLED, True)),
         }

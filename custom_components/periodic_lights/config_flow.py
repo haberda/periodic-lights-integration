@@ -8,8 +8,6 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN,
@@ -31,94 +29,16 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_TRANSITION,
     DEFAULT_DEBOUNCE_DELAY,
+    AREA_CLEARED,
+    OPT_MANUAL_LIGHTS,
+)
+from .light_selection import (
+    area_id_from_storage,
+    async_get_lights_in_area,
+    filter_configurable_lights,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# Internal options key: the user's explicit list (authoritative)
-OPT_MANUAL_LIGHTS = "manual_lights"
-
-# Sentinel used to persist "cleared" for area_id in entry.options
-AREA_CLEARED = "__cleared__"
-
-
-def _is_onoff_only_light(hass, entity_id: str) -> bool:
-    """Return True if we can confidently determine the light is on/off only."""
-    state = hass.states.get(entity_id)
-    if state is None:
-        return False
-
-    modes = state.attributes.get("supported_color_modes")
-    if not modes:
-        return False
-
-    modes_set = {str(m).lower() for m in modes}
-    return modes_set == {"onoff"}
-
-
-def _filter_configurable_lights(
-    hass,
-    entity_ids: list[str],
-    *,
-    warn_on_dropped: bool = False,
-    context: str = "",
-) -> list[str]:
-    """Filter out on/off-only lights.
-
-    - Always silently drop.
-    - Optionally warn for dropped lights (manual selection).
-    """
-    kept: list[str] = []
-    dropped: list[str] = []
-
-    for eid in entity_ids:
-        if _is_onoff_only_light(hass, eid):
-            dropped.append(eid)
-        else:
-            kept.append(eid)
-
-    if warn_on_dropped and dropped:
-        _LOGGER.warning(
-            "Periodic Lights: dropped %d on/off-only light(s) from %s selection: %s",
-            len(dropped),
-            context or "manual",
-            ", ".join(dropped),
-        )
-
-    return sorted(set(kept))
-
-
-async def async_get_lights_in_area(
-    hass,
-    area_id: str,
-    *,
-    include_hidden: bool = False,
-) -> list[str]:
-    """Return all light entity_ids associated with the given area."""
-    dev_reg = dr.async_get(hass)
-    ent_reg = er.async_get(hass)
-
-    lights: list[str] = []
-
-    for entity in ent_reg.entities.values():
-        if entity.domain != "light":
-            continue
-
-        if not include_hidden and entity.hidden_by is not None:
-            continue
-
-        # An explicit entity area overrides its device's area.
-        if entity.area_id is not None:
-            if entity.area_id == area_id:
-                lights.append(entity.entity_id)
-            continue
-
-        if entity.device_id:
-            device = dev_reg.devices.get(entity.device_id)
-            if device and device.area_id == area_id:
-                lights.append(entity.entity_id)
-
-    return sorted(set(lights))
 
 
 def _normalize_area_id(area_id: Any) -> str | None:
@@ -139,18 +59,6 @@ def _area_id_to_storage(area_id: str | None) -> str:
     return area_id if area_id else AREA_CLEARED
 
 
-def _area_id_from_storage(value: Any) -> str | None:
-    """Read area_id from options/data; treat sentinel as cleared."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        s = value.strip()
-        if not s or s == AREA_CLEARED:
-            return None
-        return s
-    return None
-
-
 async def _compute_combined_lights(
     hass,
     *,
@@ -160,7 +68,7 @@ async def _compute_combined_lights(
     warn_context: str,
 ) -> tuple[list[str], list[str], list[str]]:
     """Return (combined, manual_filtered, area_filtered)."""
-    manual_filtered = _filter_configurable_lights(
+    manual_filtered = filter_configurable_lights(
         hass,
         manual_lights_raw,
         warn_on_dropped=True,
@@ -170,7 +78,7 @@ async def _compute_combined_lights(
     area_filtered: list[str] = []
     if area_id:
         area_raw = await async_get_lights_in_area(hass, area_id, include_hidden=use_hidden)
-        area_filtered = _filter_configurable_lights(
+        area_filtered = filter_configurable_lights(
             hass,
             area_raw,
             warn_on_dropped=False,
@@ -305,7 +213,7 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         # Read stored values (options override data)
-        current_area_id = _area_id_from_storage(self._get_effective(CONF_AREA_ID, None))
+        current_area_id = area_id_from_storage(self._get_effective(CONF_AREA_ID, None))
         current_use_hidden: bool = bool(self._get_effective(CONF_USE_HIDDEN, False))
 
         # Manual selector defaults to manual list ONLY (authoritative),

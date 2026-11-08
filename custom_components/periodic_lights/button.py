@@ -9,6 +9,10 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_OVERRIDDEN_LIGHTS,
+    ATTR_EXPECTED_CHANGES,
+    ATTR_LAST_APPLIED,
+    ATTR_CONTROLLED_LIGHTS,
     DOMAIN,
     CONF_NAME,
     CONF_LIGHTS,
@@ -16,13 +20,6 @@ from .const import (
     SIGNAL_REFRESH_ENTITIES,
 )
 from .light_control import async_update_lights_for_entry
-
-# Must match __init__.py runtime keys
-ATTR_OVERRIDDEN_LIGHTS = "overridden_lights"          # set[str]
-ATTR_EXPECTED_CHANGES = "pl_expected_changes"         # dict
-ATTR_LAST_APPLIED = "pl_last_applied"                 # dict
-ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"       # set[str]
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
