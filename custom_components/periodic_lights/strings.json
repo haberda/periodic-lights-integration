@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Periodic Lights",
-        "description": "Create a light setup controlled by Periodic Lights.",
+        "title": "Periodic Lights setup",
+        "description": "Configure which lights and ranges this setup will control.",
         "data": {
           "name": "Setup name",
           "area_id": "Choose area (optional)",
@@ -34,7 +34,7 @@
     "step": {
       "init": {
         "title": "Periodic Lights options",
-        "description": "Update the lights in this setup.",
+        "description": "Update which lights this setup controls.",
         "data": {
           "area_id": "Choose area (optional)",
           "use_hidden": "Use hidden lights in configured area",
