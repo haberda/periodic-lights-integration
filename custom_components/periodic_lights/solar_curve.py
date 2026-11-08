@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import math
-from typing import Tuple
-from .curve_math import apply_shaping, map_pct_to_range
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -81,7 +78,7 @@ def _get_solar_cycle(hass: HomeAssistant) -> SolarCycle:
     )
 
 
-def daily_pct(hass: HomeAssistant) -> Tuple[float, SolarCycle]:
+def daily_pct(hass: HomeAssistant) -> tuple[float, SolarCycle]:
     """Return an unshaped daily phase in [0,1] and the solar cycle.
 
     Definition:

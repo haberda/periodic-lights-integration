@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import time as dt_time
-from typing import Any
 
 from homeassistant.components.time import TimeEntity
 from homeassistant.core import HomeAssistant
