@@ -28,6 +28,7 @@ All parameters are accessible through the built-in config flow and the entities 
 | **Maximum Color Temperature (K)** | Coolest kelvin. |
 | **Update Interval (s)** | How often to push updates to lights. |
 | **Transition Time (s)** | How long lights fade when updated. |
+| **Debounce Delay (s)** | How long to wait after a light turns on before adapting. Lights that turn on within this window (for example, from a scene) are adapted together in one update. Default 0.3 s; 0 adapts each light immediately. |
 
 ### Controls and entities
 

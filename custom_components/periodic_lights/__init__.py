@@ -27,6 +27,7 @@ from .const import (
     CONF_USE_HIDDEN,
     CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
+    CONF_DEBOUNCE_DELAY,
     ATTR_ENABLED,
     ATTR_BRIGHTNESS_ENABLED,
     ATTR_COLOR_TEMP_ENABLED,
@@ -43,6 +44,7 @@ from .const import (
     DEFAULT_MAX_KELVIN,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_TRANSITION,
+    DEFAULT_DEBOUNCE_DELAY,
     DEFAULT_SHAPING_PARAM,
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
@@ -225,6 +227,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_MAX_KELVIN: get_effective(entry, CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN),
         CONF_UPDATE_INTERVAL: get_effective(entry, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
         CONF_TRANSITION: get_effective(entry, CONF_TRANSITION, DEFAULT_TRANSITION),
+        CONF_DEBOUNCE_DELAY: get_effective(entry, CONF_DEBOUNCE_DELAY, DEFAULT_DEBOUNCE_DELAY),
         ATTR_ENABLED: True,
         ATTR_BRIGHTNESS_ENABLED: True,
         ATTR_COLOR_TEMP_ENABLED: True,
@@ -334,6 +337,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _notify_entry_state_changed()
 
+    # ---- Coalesce turn-on updates ----
+    # A scene can switch on many lights at once. Each turn-on would otherwise
+    # start its own forced update for every light in the setup.
+    cancel_turn_on_update = None
+
+    @callback
+    def _run_turn_on_update(_now=None) -> None:
+        nonlocal cancel_turn_on_update
+        cancel_turn_on_update = None
+        hass.async_create_task(async_update_lights_for_entry(hass, entry.entry_id, force=True))
+
+    @callback
+    def _schedule_turn_on_update(state: dict[str, Any]) -> None:
+        nonlocal cancel_turn_on_update
+        try:
+            delay = max(0.0, float(state.get(CONF_DEBOUNCE_DELAY, DEFAULT_DEBOUNCE_DELAY)))
+        except (TypeError, ValueError):
+            delay = float(DEFAULT_DEBOUNCE_DELAY)
+        if cancel_turn_on_update is not None:
+            cancel_turn_on_update()
+            cancel_turn_on_update = None
+        if delay == 0:
+            _run_turn_on_update()
+            return
+        # Each turn-on restarts the wait, so a burst ends in one update.
+        cancel_turn_on_update = async_call_later(hass, delay, _run_turn_on_update)
+
+    @callback
+    def _cancel_turn_on_update() -> None:
+        nonlocal cancel_turn_on_update
+        if cancel_turn_on_update is not None:
+            cancel_turn_on_update()
+            cancel_turn_on_update = None
+
+    entry.async_on_unload(_cancel_turn_on_update)
+
     @callback
     def _handle_light_state_change(event) -> None:
         """Handle on/off events and continuously detect manual adjustments."""
@@ -383,7 +422,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _mark_control_for_light_once(state, entity_id)
 
             if state.get(ATTR_TRANSITION_ON_TURN_ON, True):
-                hass.async_create_task(async_update_lights_for_entry(hass, entry.entry_id, force=True))
+                _schedule_turn_on_update(state)
 
             return
 
