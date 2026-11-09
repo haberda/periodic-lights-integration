@@ -57,7 +57,13 @@ from .const import (
     ATTR_RESCHEDULE_LIGHT_UPDATES,
     ATTR_STOP_LIGHT_UPDATES,
 )
-from .light_selection import async_resolve_entry_lights, entry_area_id, entry_use_hidden, get_effective
+from .light_selection import (
+    async_resolve_entry_lights,
+    entry_area_id,
+    entry_label_ids,
+    entry_use_hidden,
+    get_effective,
+)
 from .light_control import async_update_lights_for_entry, cancel_pending_light_updates, layered_group_owner
 
 _LOGGER = logging.getLogger(__name__)
@@ -528,8 +534,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
 
-    # ---- Keep area membership current when registries change ----
-    if area_val:
+    # ---- Keep area and label membership current when registries change ----
+    if area_val or entry_label_ids(entry):
         cancel_registry_refresh = None
 
         @callback
@@ -559,7 +565,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         @callback
         def _on_device_registry_updated(event) -> None:
             data = event.data
-            if data.get("action") != "update" or "area_id" in (data.get("changes") or {}):
+            changes = data.get("changes") or {}
+            if data.get("action") != "update" or "area_id" in changes or "labels" in changes:
                 _schedule_registry_refresh()
 
         entry.async_on_unload(

@@ -19,6 +19,7 @@ from .const import (
     CONF_MAX_KELVIN,
     CONF_AREA_ID,
     CONF_USE_HIDDEN,
+    CONF_LABEL_IDS,
     CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
     CONF_DEBOUNCE_DELAY,
@@ -35,6 +36,8 @@ from .const import (
 from .light_selection import (
     area_id_from_storage,
     async_get_lights_in_area,
+    async_get_lights_with_labels,
+    label_ids_from_storage,
     filter_configurable_lights,
 )
 
@@ -66,6 +69,7 @@ async def _compute_combined_lights(
     area_id: str | None,
     use_hidden: bool,
     warn_context: str,
+    label_ids: list[str] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     """Return (combined, manual_filtered, area_filtered)."""
     manual_filtered = filter_configurable_lights(
@@ -85,7 +89,12 @@ async def _compute_combined_lights(
             context="area",
         )
 
-    combined = sorted(set(manual_filtered) | set(area_filtered))
+    labeled_filtered: list[str] = []
+    if label_ids:
+        labeled_raw = await async_get_lights_with_labels(hass, label_ids, include_hidden=use_hidden)
+        labeled_filtered = filter_configurable_lights(hass, labeled_raw)
+
+    combined = sorted(set(manual_filtered) | set(area_filtered) | set(labeled_filtered))
     return combined, manual_filtered, area_filtered
 
 
@@ -107,6 +116,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             max_kelvin = int(user_input[CONF_MAX_KELVIN])
             area_id = _normalize_area_id(user_input.get(CONF_AREA_ID))
             use_hidden: bool = bool(user_input.get(CONF_USE_HIDDEN, False))
+            label_ids = label_ids_from_storage(user_input.get(CONF_LABEL_IDS, []))
             update_interval = int(user_input[CONF_UPDATE_INTERVAL])
             transition = int(user_input[CONF_TRANSITION])
             debounce_delay = float(user_input.get(CONF_DEBOUNCE_DELAY, DEFAULT_DEBOUNCE_DELAY))
@@ -117,6 +127,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 area_id=area_id,
                 use_hidden=use_hidden,
                 warn_context="manual",
+                label_ids=label_ids,
             )
 
             if not combined_lights:
@@ -145,6 +156,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_NAME: name,
                         CONF_AREA_ID: area_id,
                         CONF_USE_HIDDEN: use_hidden,
+                        CONF_LABEL_IDS: label_ids,
                         CONF_LIGHTS: combined_lights,
                         OPT_MANUAL_LIGHTS: manual_filtered,
                         CONF_MIN_BRIGHTNESS: min_brightness,
@@ -161,6 +173,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_NAME): str,
                 vol.Optional(CONF_AREA_ID): selector.selector({"area": {}}),
+                vol.Optional(CONF_LABEL_IDS, default=[]): selector.selector({"label": {"multiple": True}}),
                 vol.Required(CONF_USE_HIDDEN, default=False): selector.selector({"boolean": {}}),
                 vol.Optional(CONF_LIGHTS, default=[]): selector.selector(
                     {"entity": {"domain": "light", "multiple": True}}
@@ -215,6 +228,7 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
         # Read stored values (options override data)
         current_area_id = area_id_from_storage(self._get_effective(CONF_AREA_ID, None))
         current_use_hidden: bool = bool(self._get_effective(CONF_USE_HIDDEN, False))
+        current_label_ids = label_ids_from_storage(self._get_effective(CONF_LABEL_IDS, []))
 
         # Manual selector defaults to manual list ONLY (authoritative),
         # never to CONF_LIGHTS (combined), or area lights get “baked in”.
@@ -226,6 +240,8 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
             area_id = _normalize_area_id(user_input.get(CONF_AREA_ID))
             use_hidden: bool = bool(user_input.get(CONF_USE_HIDDEN, False))
             manual_raw: list[str] = user_input.get(CONF_LIGHTS, [])
+            # A cleared label selector may omit the key; store [] so it stays cleared.
+            label_ids = label_ids_from_storage(user_input.get(CONF_LABEL_IDS, []))
 
             combined_lights, manual_filtered, _ = await _compute_combined_lights(
                 self.hass,
@@ -233,6 +249,7 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
                 area_id=area_id,
                 use_hidden=use_hidden,
                 warn_context="options-manual",
+                label_ids=label_ids,
             )
 
             if not combined_lights:
@@ -255,6 +272,7 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
                         # store "" when cleared so we don't fall back to entry.data on reboot
                         CONF_AREA_ID: _area_id_to_storage(area_id),
                         CONF_USE_HIDDEN: use_hidden,
+                        CONF_LABEL_IDS: label_ids,
                         OPT_MANUAL_LIGHTS: manual_filtered,
                         # store combined for runtime convenience
                         CONF_LIGHTS: combined_lights,
@@ -264,6 +282,7 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
             # If we’re returning the form due to errors, keep user edits
             current_area_id = area_id
             current_use_hidden = use_hidden
+            current_label_ids = label_ids
             current_manual = manual_raw
 
         # ----------------------------
@@ -276,6 +295,11 @@ class PeriodicLightsOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_AREA_ID,
                 description={"suggested_value": current_area_id or ""},
             ): selector.selector({"area": {}}),
+
+            vol.Optional(
+                CONF_LABEL_IDS,
+                description={"suggested_value": current_label_ids},
+            ): selector.selector({"label": {"multiple": True}}),
 
             vol.Required(
                 CONF_USE_HIDDEN,

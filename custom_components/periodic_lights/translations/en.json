@@ -7,7 +7,8 @@
         "data": {
           "name": "Setup name",
           "area_id": "Choose area (optional)",
-          "use_hidden": "Use hidden lights in configured area",
+          "label_ids": "Choose labels (optional)",
+          "use_hidden": "Include hidden lights from the area and labels",
           "lights": "Choose lights (optional)",
           "min_brightness": "Minimum brightness (%)",
           "max_brightness": "Maximum brightness (%)",
@@ -20,7 +21,7 @@
       }
     },
     "error": {
-      "no_lights": "No lights to control. Select lights or an area that contains lights. Lights that only support on/off can't be adapted and are skipped.",
+      "no_lights": "No lights to control. Select lights, an area, or labels that include lights. Lights that only support on/off can't be adapted and are skipped.",
       "brightness_out_of_range": "Brightness must be between 0 and 100%.",
       "min_brightness_greater_than_max": "Minimum brightness cannot be greater than maximum brightness.",
       "kelvin_out_of_range": "Color temperature must be between 1500 K and 6500 K.",
@@ -37,13 +38,14 @@
         "description": "Update which lights this setup controls.",
         "data": {
           "area_id": "Choose area (optional)",
-          "use_hidden": "Use hidden lights in configured area",
+          "label_ids": "Choose labels (optional)",
+          "use_hidden": "Include hidden lights from the area and labels",
           "lights": "Choose lights (optional)"
         }
       }
     },
     "error": {
-      "no_lights": "No lights to control. Select lights or an area that contains lights. Lights that only support on/off can't be adapted and are skipped."
+      "no_lights": "No lights to control. Select lights, an area, or labels that include lights. Lights that only support on/off can't be adapted and are skipped."
     }
   },
   "entity": {
