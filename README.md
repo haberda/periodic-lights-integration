@@ -8,7 +8,7 @@ YAML or file editing required for setup.
 
 ## Features
 
-- Select lights individually or by area.
+- Select lights individually, by area, or by label.
 - Choose from four curve shapes, with adjustable brightness and temperature ranges.
 - Use solar timing or a fixed minimum time, with optional separate temperature shaping.
 - Set per-light ranges, smooth transitions, and bedtime mode.
@@ -20,7 +20,7 @@ YAML or file editing required for setup.
    `config/custom_components/` directory.
 2. Restart Home Assistant.
 3. Open **Settings → Devices & Services → Add Integration → Periodic Lights**.
-4. Choose your lights or area and set the brightness and temperature ranges.
+4. Choose your lights, area, or labels and set the brightness and temperature ranges.
 
 After setup, open the integration’s device page to adjust its controls.
 See the [configuration reference](docs.md#configuration) for individual options.

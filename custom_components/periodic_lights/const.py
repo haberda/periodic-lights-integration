@@ -8,6 +8,7 @@ CONF_MIN_KELVIN = "min_kelvin"
 CONF_MAX_KELVIN = "max_kelvin"
 CONF_AREA_ID = "area_id"
 CONF_USE_HIDDEN = "use_hidden"
+CONF_LABEL_IDS = "label_ids"
 
 # Config stored in entry.data
 CONF_UPDATE_INTERVAL = "update_interval"  # seconds

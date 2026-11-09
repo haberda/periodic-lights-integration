@@ -10,7 +10,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .const import AREA_CLEARED, CONF_AREA_ID, CONF_LIGHTS, CONF_USE_HIDDEN, OPT_MANUAL_LIGHTS
+from .const import (
+    AREA_CLEARED,
+    CONF_AREA_ID,
+    CONF_LABEL_IDS,
+    CONF_LIGHTS,
+    CONF_USE_HIDDEN,
+    OPT_MANUAL_LIGHTS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +63,24 @@ def filter_configurable_lights(
     return sorted(set(kept))
 
 
+def _registry_lights(hass: HomeAssistant, include_hidden: bool, matches) -> list[str]:
+    """Return light entity_ids for which matches(entity, device) is true."""
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
+    lights: list[str] = []
+    for entity in ent_reg.entities.values():
+        if entity.domain != "light":
+            continue
+        if not include_hidden and entity.hidden_by is not None:
+            continue
+        device = dev_reg.devices.get(entity.device_id) if entity.device_id else None
+        if matches(entity, device):
+            lights.append(entity.entity_id)
+
+    return sorted(set(lights))
+
+
 async def async_get_lights_in_area(
     hass: HomeAssistant,
     area_id: str,
@@ -63,30 +88,43 @@ async def async_get_lights_in_area(
     include_hidden: bool = False,
 ) -> list[str]:
     """Return all light entity_ids associated with the given area."""
-    dev_reg = dr.async_get(hass)
-    ent_reg = er.async_get(hass)
 
-    lights: list[str] = []
-
-    for entity in ent_reg.entities.values():
-        if entity.domain != "light":
-            continue
-
-        if not include_hidden and entity.hidden_by is not None:
-            continue
-
+    def matches(entity, device) -> bool:
         # An explicit entity area overrides its device's area.
         if entity.area_id is not None:
-            if entity.area_id == area_id:
-                lights.append(entity.entity_id)
-            continue
+            return entity.area_id == area_id
+        return device is not None and device.area_id == area_id
 
-        if entity.device_id:
-            device = dev_reg.devices.get(entity.device_id)
-            if device and device.area_id == area_id:
-                lights.append(entity.entity_id)
+    return _registry_lights(hass, include_hidden, matches)
 
-    return sorted(set(lights))
+
+async def async_get_lights_with_labels(
+    hass: HomeAssistant,
+    label_ids: list[str],
+    *,
+    include_hidden: bool = False,
+) -> list[str]:
+    """Return lights that carry any of the labels, directly or through their device.
+
+    This matches how Home Assistant resolves a label target in a service call.
+    """
+    wanted = set(label_ids)
+    if not wanted:
+        return []
+
+    def matches(entity, device) -> bool:
+        if wanted & set(getattr(entity, "labels", ()) or ()):
+            return True
+        return device is not None and bool(wanted & set(getattr(device, "labels", ()) or ()))
+
+    return _registry_lights(hass, include_hidden, matches)
+
+
+def label_ids_from_storage(value: Any) -> list[str]:
+    """Read stored label ids; ignore anything that is not a non-empty string."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    return sorted({v.strip() for v in value if isinstance(v, str) and v.strip()})
 
 
 def area_id_from_storage(value: Any) -> str | None:
@@ -109,12 +147,16 @@ def entry_area_id(entry: ConfigEntry) -> str | None:
     return area_id_from_storage(get_effective(entry, CONF_AREA_ID, None))
 
 
+def entry_label_ids(entry: ConfigEntry) -> list[str]:
+    return label_ids_from_storage(get_effective(entry, CONF_LABEL_IDS, []))
+
+
 def entry_use_hidden(entry: ConfigEntry) -> bool:
     return bool(get_effective(entry, CONF_USE_HIDDEN, False))
 
 
 async def async_resolve_entry_lights(hass: HomeAssistant, entry: ConfigEntry) -> list[str]:
-    """Return the entry's manual lights combined with its area's lights."""
+    """Return the entry's manual lights combined with its area and label lights."""
     if OPT_MANUAL_LIGHTS in entry.options:
         manual_raw = entry.options.get(OPT_MANUAL_LIGHTS)
     elif OPT_MANUAL_LIGHTS in entry.data:
@@ -130,4 +172,12 @@ async def async_resolve_entry_lights(hass: HomeAssistant, entry: ConfigEntry) ->
         area_raw = await async_get_lights_in_area(hass, area_id, include_hidden=entry_use_hidden(entry))
         area = filter_configurable_lights(hass, area_raw)
 
-    return sorted(set(manual) | set(area))
+    labeled: list[str] = []
+    label_ids = entry_label_ids(entry)
+    if label_ids:
+        labeled_raw = await async_get_lights_with_labels(
+            hass, label_ids, include_hidden=entry_use_hidden(entry)
+        )
+        labeled = filter_configurable_lights(hass, labeled_raw)
+
+    return sorted(set(manual) | set(area) | set(labeled))

@@ -20,7 +20,8 @@ All parameters are accessible through the built-in config flow and the entities 
 |----------|-------------|
 | **Setup Name** | A friendly name for the lighting setup. |
 | **Choose Area (optional)** | Allows selecting an HA Area; lights in that area are automatically added. Area membership is re-checked a couple of seconds after lights or devices are added, removed, or moved between areas, so no reconfiguration is needed. |
-| **Use Hidden Lights in Configured Area** | Includes hidden light entities in the area scan. |
+| **Choose Labels (optional)** | Adds every light that has one of the selected labels, either on the light itself or on its device. This is how Home Assistant resolves a label target in a service call. Like the area, label membership is re-checked shortly after labels change. |
+| **Include Hidden Lights from the Area and Labels** | Includes hidden light entities when collecting area and label lights. |
 | **Choose Lights (optional)** | Manually select individual lights. |
 | **Minimum Brightness (%)** | Lowest brightness curve value. |
 | **Maximum Brightness (%)** | Highest brightness curve value. |
