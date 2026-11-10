@@ -50,7 +50,8 @@ def load_runtime():
         def __init_subclass__(cls, **kwargs):
             pass
     module('homeassistant.config_entries', ConfigEntry=object, ConfigFlow=ConfigFlow, OptionsFlow=object)
-    module('voluptuous')
+    module('voluptuous', Invalid=type('Invalid', (Exception,), {}))
+    module('homeassistant.exceptions', HomeAssistantError=type('HomeAssistantError', (Exception,), {}))
     module('homeassistant.const', EVENT_HOMEASSISTANT_STARTED='started')
     module('homeassistant.helpers')
     module('homeassistant.helpers.selector')

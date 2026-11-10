@@ -66,7 +66,7 @@ class DeduplicationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failure_is_retried(self):
         self.hass.services.async_call.side_effect = RuntimeError("device failed")
-        with self.assertRaises(RuntimeError):
+        with self.assertLogs(self.control._LOGGER, "ERROR"):
             await self.update()
         self.hass.services.async_call.side_effect = None
         await self.update()
