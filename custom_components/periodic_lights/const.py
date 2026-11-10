@@ -41,6 +41,7 @@ ATTR_LAST_COMMAND_SENT = "pl_last_command_sent"  # dict[light_id, dict[str, Any]
 ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # set[str], logbook gating
 ATTR_OVERRIDE_DETECTION_READY = "pl_override_detection_ready"  # bool
 ATTR_UPDATE_TASKS = "pl_update_tasks"  # set[asyncio.Task]
+ATTR_FAILED_LIGHTS = "pl_failed_lights"  # set[str], lights whose last command failed
 ATTR_RESCHEDULE_LIGHT_UPDATES = "pl_reschedule_light_updates"  # callback
 ATTR_STOP_LIGHT_UPDATES = "pl_stop_light_updates"  # callback
 

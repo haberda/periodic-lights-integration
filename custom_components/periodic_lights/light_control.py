@@ -4,12 +4,16 @@ import asyncio
 import logging
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.components import logbook
 from homeassistant.core import Context, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ATTR_FAILED_LIGHTS,
     ATTR_OVERRIDDEN_LIGHTS,
     ATTR_EXPECTED_CHANGES,
     ATTR_LAST_APPLIED,
@@ -231,6 +235,11 @@ async def async_update_lights_for_entry(
     tasks.add(task)
     try:
         await _async_update_lights_for_entry(hass, entry_id, force=force)
+    except Exception:
+        # Most callers are fire-and-forget tasks; log with context instead of
+        # leaving "Task exception was never retrieved". CancelledError is not
+        # an Exception, so unload and shutdown still cancel the update.
+        _LOGGER.exception("Periodic Lights update failed | entry_id=%s force=%s", entry_id, force)
     finally:
         tasks.discard(task)
 
@@ -333,12 +342,25 @@ async def _async_update_lights_for_entry(
         try:
             # Cache only successful service executions, so failures can be retried.
             await hass.services.async_call("light", service, svc_data, blocking=True, context=Context())
-        except BaseException:
+        except BaseException as err:
             for lid in eligible:
                 if entry_data.get(ATTR_EXPECTED_CHANGES, {}).get(lid) is expected[lid]:
                     entry_data[ATTR_EXPECTED_CHANGES].pop(lid, None)
                 entry_data.get(ATTR_LAST_APPLIED, {}).pop(lid, None)
-            raise
+            if not isinstance(err, (HomeAssistantError, vol.Invalid)):
+                raise
+            # An unreachable light must not stop the other groups in this pass.
+            # Warn once; stay at debug while the same lights keep failing.
+            failed = entry_data.setdefault(ATTR_FAILED_LIGHTS, set())
+            log = _LOGGER.debug if failed.issuperset(eligible) else _LOGGER.warning
+            failed.update(eligible)
+            log(
+                "Periodic Lights command failed, will retry on the next update | "
+                "entry_id=%s service=light.%s entity_ids=%s error=%s",
+                entry_id, service, eligible, err,
+            )
+            return
+        entry_data.get(ATTR_FAILED_LIGHTS, set()).difference_update(eligible)
         for lid in eligible:
             # Off/on, disable, or override clearing during the call invalidates this session.
             if (service == "turn_on"

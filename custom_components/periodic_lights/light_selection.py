@@ -74,7 +74,7 @@ def _registry_lights(hass: HomeAssistant, include_hidden: bool, matches) -> list
             continue
         if not include_hidden and entity.hidden_by is not None:
             continue
-        device = dev_reg.devices.get(entity.device_id) if entity.device_id else None
+        device = dev_reg.async_get(entity.device_id) if entity.device_id else None
         if matches(entity, device):
             lights.append(entity.entity_id)
 

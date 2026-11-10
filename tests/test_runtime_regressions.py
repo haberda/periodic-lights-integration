@@ -183,9 +183,9 @@ class AreaSelectionTests(unittest.IsolatedAsyncioTestCase):
             )
         }
         flow.er.async_get.return_value = SimpleNamespace(entities=entities)
-        flow.dr.async_get.return_value = SimpleNamespace(devices={
+        flow.dr.async_get.return_value = SimpleNamespace(async_get={
             'device': SimpleNamespace(area_id='kitchen'),
-        })
+        }.get)
         self.assertEqual(await flow.async_get_lights_in_area(None, 'kitchen'),
                          ['light.explicit', 'light.inherited'])
         self.assertEqual(await flow.async_get_lights_in_area(None, 'bedroom'),

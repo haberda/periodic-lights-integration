@@ -25,9 +25,9 @@ class LabelLookupTests(unittest.IsolatedAsyncioTestCase):
             entity('switch.fan', labels={'reading'}),
         )}
         self.selection.er.async_get.return_value = SimpleNamespace(entities=entities)
-        self.selection.dr.async_get.return_value = SimpleNamespace(devices={
+        self.selection.dr.async_get.return_value = SimpleNamespace(async_get={
             'dev1': SimpleNamespace(labels={'reading'}, area_id=None),
-        })
+        }.get)
 
     async def test_entity_and_device_labels_match(self):
         self.assertEqual(
