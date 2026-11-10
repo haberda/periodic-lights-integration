@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Boost: temporarily follow a different shaping function and parameter, for example to
+  brighten the evening when guests arrive. Lights keep adapting, transitioning and
+  respecting overrides. Boost ends after a set duration (default 120 minutes) or when
+  turned off, and resumes after a restart if it hasn't ended.
+
 ## 0.1.1
 
 ### Fixed

@@ -1,6 +1,6 @@
 """Render the configured local-day schedule without touching light services."""
 
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from textwrap import wrap
 
@@ -50,6 +50,13 @@ def render_preview(settings, now, cycle):
         notices.append("Brightness control disabled")
     if not settings.get("color_temp_enabled", True):
         notices.append("Temperature control disabled")
+    if settings.get("boost_active", False):
+        until = settings.get("boost_until")
+        if isinstance(until, (int, float)):
+            ends = datetime.fromtimestamp(until, now.tzinfo)
+            notices.append(f"Boost active until {ends:%H:%M}: showing the boost shape")
+        else:
+            notices.append("Boost active: showing the boost shape")
     if not notices:
         notices.append(
             "Setup-wide targets; individual overrides and light on/off state may differ"

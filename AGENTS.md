@@ -21,6 +21,9 @@ All integration code lives in `custom_components/periodic_lights/`:
   timing, and shared timestamp-based curve evaluation.
 - `temperature_curve.py`, `temperature_entities.py`: independent temperature
   settings and their restore-capable controls.
+- `boost.py`: boost state and `effective_settings`, which swaps in the boost shape.
+  Live targets, diagnostics, and the preview all read shaping through it.
+- `boost_control.py`: starting, stopping, expiring, and restoring boost.
 - `sensor.py`: desired-value and per-light adaptation diagnostics.
 - `image.py`, `preview.py`: native image entity and cached PNG curve rendering.
 - `switch.py`, `number.py`, `select.py`, `time.py`, `button.py`: user controls.

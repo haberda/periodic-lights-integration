@@ -57,6 +57,14 @@ ATTR_FIXED_MIN_TIME = "fixed_min_time"           # seconds since midnight (float
 ATTR_SHAPING_PARAM = "shaping_param"          # float
 ATTR_SHAPING_FUNCTION = "shaping_function"    # str, e.g. "gamma_sine"
 
+# Boost: temporarily swap the shaping function and parameter
+ATTR_BOOST_ACTIVE = "boost_active"                      # bool
+ATTR_BOOST_UNTIL = "boost_until"                        # UTC timestamp, or None for no end
+ATTR_BOOST_SHAPING_FUNCTION = "boost_shaping_function"  # str
+ATTR_BOOST_SHAPING_PARAM = "boost_shaping_param"        # float
+ATTR_BOOST_DURATION = "boost_duration"                  # minutes; 0 means until turned off
+ATTR_BOOST_CANCEL_TIMER = "pl_boost_cancel_timer"       # runtime-only expiry callback
+
 DEFAULT_MIN_BRIGHTNESS = 1
 DEFAULT_MAX_BRIGHTNESS = 100
 DEFAULT_MIN_KELVIN = 2500
@@ -66,6 +74,9 @@ DEFAULT_TRANSITION = 5              # seconds
 DEFAULT_SHAPING_PARAM = 1.0         # Gamma=1 => baseline half-sine
 DEFAULT_SHAPING_FUNCTION = "gamma_sine"
 DEFAULT_FIXED_MIN_TIME = "00:00"
+DEFAULT_BOOST_SHAPING_FUNCTION = "gamma_sine"
+DEFAULT_BOOST_SHAPING_PARAM = 0.3   # Gamma < 1 lifts the evening while keeping the curve's shape
+DEFAULT_BOOST_DURATION = 120        # minutes
 DEFAULT_DEBOUNCE_DELAY = 0.3        # seconds - small delay to prevent CPU thrashing on rapid state changes
 
 # Add "button"

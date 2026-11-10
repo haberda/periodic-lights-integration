@@ -43,6 +43,7 @@ When setup completes, you get multiple controls grouped under one device:
 | **Brightness Updates** | Toggles brightness control. |
 | **Color Temperature Updates** | Toggles CT control. |
 | **Bedtime** | When on, forces all lights to minimum brightness & CT. |
+| **Boost** | Temporarily follows the boost shape. See [Boost](#boost). |
 | **Transition When Light Turns On** | If enabled, newly turned-on lights immediately transition to current curve values. |
 | **Use Fixed Minimum Time** | If enabled, uses the time set in the Fixed Minimum Time entity to set a fixed minimum point. Using this feature disables solar based curve calculation so the light parameters will not vary with the season. |
 
@@ -57,6 +58,8 @@ These are editable anytime:
 | Update Interval | Adjust how often lights update. |
 | Transition Time | Set fade time when applying changes. |
 | Shaping Parameter | Parameter controlling the shaping function behavior. |
+| Boost Shaping Parameter | Shaping parameter used while boost is on. Default 0.3. |
+| Boost Duration | Minutes boost stays on. Default 120; 0 keeps it on until turned off. |
 
 Each configured light also gets **per-light**:
 
@@ -72,6 +75,7 @@ These start disabled but can be enabled via Entity Registry.
 | Entity | Options |
 |--------|---------|
 | **Shaping Function** | Gamma Sine, Time-Warped Sine, Triangular, Eased Triangular |
+| **Boost Shaping Function** | Same options; used while boost is on. Default Gamma Sine. |
 
 ## Shaping functions
 
@@ -131,6 +135,32 @@ Shaping parameter 1.5:
 Shaping parameter 2:
 
 <img src='assets/images/curves_param_2.png' width=800>
+
+## Boost
+
+Boost brightens a setup for a while without stopping it from adapting, for example
+when guests arrive in the evening. While **Boost** is on, the setup follows the
+**Boost Shaping Function** and **Boost Shaping Parameter** in place of its normal
+shape. Everything else continues as usual: solar timing, brightness and color ranges,
+per-light ranges, transitions, manual overrides, bedtime, and periodic updates. The
+lights still change through the evening, just along the boost curve.
+
+The defaults, Gamma Sine with a shape of 0.3, lift the evening and still dim toward
+night. At 9 pm this gives about 74% of the brightness range, where the default shape
+gives about 37%.
+
+- Turning boost on or off sends one update straight away, using the normal transition.
+- Boost turns itself off after **Boost Duration** minutes. Set the duration to 0 to
+  keep boost on until you turn it off. The switch's `ends_at` attribute shows when it
+  ends. Changing the duration while boost is on affects the next boost, not the
+  current one.
+- With linked curves (the default), color temperature follows the boost shape too.
+  With **Use separate temperature curve** on, color temperature keeps its own shape
+  and boost changes brightness only.
+- A boost that hasn't ended survives a restart or reload.
+- Bedtime still takes priority: with bedtime on, lights stay at their minimums.
+- While boost is on, the [daily curve preview](#daily-curve-preview) shows the boost
+  shape and when it ends.
 
 ## Daily curve preview
 

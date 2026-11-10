@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MANUFACTURER, SIGNAL_REFRESH_ENTITIES, SIGNAL_UPDATE_SENSORS
 from .preview import render_preview
+from .boost import effective_settings
 from .solar_curve import daily_pct
 
 
@@ -80,9 +81,10 @@ class PeriodicLightsCurveImage(ImageEntity):
                 if data is None:
                     return None
                 # Copy scalar settings before leaving the event loop.
+                # Show the curve the lights follow, including an active boost.
                 settings = {
                     key: value
-                    for key, value in data.items()
+                    for key, value in effective_settings(data).items()
                     if isinstance(value, (str, int, float, bool))
                 }
                 _, cycle = daily_pct(self.hass)
