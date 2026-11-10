@@ -12,6 +12,7 @@ YAML or file editing required for setup.
 - Choose from four curve shapes, with adjustable brightness and temperature ranges.
 - Use solar timing or a fixed minimum time, with optional separate temperature shaping.
 - Set per-light ranges, smooth transitions, and bedtime mode.
+- [Boost](docs.md#boost) a setup for a while with a brighter curve that still follows the time of day.
 - Preview the daily curve and check each light’s adaptation status.
 
 ## Installation
