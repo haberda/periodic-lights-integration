@@ -45,6 +45,7 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
     SIGNAL_REFRESH_ENTITIES,
 )
+from .boost import effective_settings
 from .curve_math import apply_shaping, map_pct_to_range
 from .solar_curve import daily_pct
 
@@ -277,12 +278,14 @@ async def _async_update_lights_for_entry(
 
     transition = float(entry_data.get(CONF_TRANSITION, DEFAULT_TRANSITION))
 
-    shaping_param = float(entry_data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
-    shaping_func = entry_data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
+    # Boost swaps the shape; timing, ranges and transitions are unchanged.
+    curve_settings = effective_settings(entry_data)
+    shaping_param = float(curve_settings.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
+    shaping_func = curve_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
     phase = _compute_phase_with_optional_override(hass, entry_data)
     pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
-    temperature_settings = temperature_curve_settings(entry_data)
+    temperature_settings = temperature_curve_settings(curve_settings)
     temperature_phase = _compute_phase_with_optional_override(hass, temperature_settings)
     temperature_shaped = apply_shaping(
         temperature_phase,

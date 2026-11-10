@@ -56,7 +56,16 @@ from .const import (
     ATTR_OVERRIDE_DETECTION_READY,
     ATTR_RESCHEDULE_LIGHT_UPDATES,
     ATTR_STOP_LIGHT_UPDATES,
+    ATTR_BOOST_ACTIVE,
+    ATTR_BOOST_UNTIL,
+    ATTR_BOOST_SHAPING_FUNCTION,
+    ATTR_BOOST_SHAPING_PARAM,
+    ATTR_BOOST_DURATION,
+    DEFAULT_BOOST_SHAPING_FUNCTION,
+    DEFAULT_BOOST_SHAPING_PARAM,
+    DEFAULT_BOOST_DURATION,
 )
+from .boost_control import cancel_boost_timer
 from .light_selection import (
     async_resolve_entry_lights,
     entry_area_id,
@@ -246,6 +255,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ATTR_FIXED_MIN_TIME: 0.0,
         ATTR_SHAPING_PARAM: DEFAULT_SHAPING_PARAM,
         ATTR_SHAPING_FUNCTION: DEFAULT_SHAPING_FUNCTION,
+        ATTR_BOOST_ACTIVE: False,
+        ATTR_BOOST_UNTIL: None,
+        ATTR_BOOST_SHAPING_FUNCTION: DEFAULT_BOOST_SHAPING_FUNCTION,
+        ATTR_BOOST_SHAPING_PARAM: DEFAULT_BOOST_SHAPING_PARAM,
+        ATTR_BOOST_DURATION: DEFAULT_BOOST_DURATION,
         ATTR_OVERRIDDEN_LIGHTS: set(),
         ATTR_EXPECTED_CHANGES: {},
         ATTR_LAST_APPLIED: {},
@@ -588,6 +602,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_state = hass.data[DOMAIN].get(entry.entry_id)
     if entry_state:
         cancel_pending_light_updates(entry_state)
+        cancel_boost_timer(entry_state)
         entry_state[ATTR_STOP_LIGHT_UPDATES]()
         # Unsubscribe global on/off listener
         unsub = entry_state.get(ATTR_LIGHT_ON_LISTENER)

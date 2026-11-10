@@ -10,6 +10,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
+    ATTR_BOOST_DURATION,
+    ATTR_BOOST_SHAPING_PARAM,
     ATTR_RESCHEDULE_LIGHT_UPDATES,
     DOMAIN,
     MANUFACTURER,
@@ -58,6 +60,8 @@ async def async_setup_entry(
             PeriodicLightsUpdateIntervalNumber(hass, entry.entry_id, setup_name),
             PeriodicLightsTransitionNumber(hass, entry.entry_id, setup_name),
             PeriodicLightsShapingParamNumber(hass, entry.entry_id, setup_name),
+            PeriodicLightsBoostShapingParamNumber(hass, entry.entry_id, setup_name),
+            PeriodicLightsBoostDurationNumber(hass, entry.entry_id, setup_name),
         ]
     )
 
@@ -394,6 +398,40 @@ class PeriodicLightsShapingParamNumber(_BasePeriodicNumber):
         # Force lights + sensors to update with the new shaping
         self.hass.async_create_task(
             async_update_lights_for_entry(self.hass, self._entry_id, force=True)
+        )
+
+
+class PeriodicLightsBoostShapingParamNumber(PeriodicLightsShapingParamNumber):
+    """Shaping parameter used while boost is active."""
+
+    def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
+        _BasePeriodicNumber.__init__(
+            self,
+            hass,
+            entry_id,
+            setup_name,
+            ATTR_BOOST_SHAPING_PARAM,
+            "Boost Shaping Parameter",
+            "boost_shaping_param",
+        )
+
+
+class PeriodicLightsBoostDurationNumber(_BasePeriodicNumber):
+    """How long boost lasts; 0 keeps it on until it is turned off."""
+
+    _attr_native_unit_of_measurement = "min"
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 1440.0
+    _attr_native_step = 5.0
+
+    def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
+        super().__init__(
+            hass,
+            entry_id,
+            setup_name,
+            ATTR_BOOST_DURATION,
+            "Boost Duration",
+            "boost_duration",
         )
 
 

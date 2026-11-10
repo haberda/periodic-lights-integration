@@ -10,6 +10,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dis
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_OVERRIDDEN_LIGHTS,
@@ -29,6 +30,8 @@ from .const import (
     ATTR_USE_FIXED_MIN_TIME,
     SIGNAL_REFRESH_ENTITIES,
 )
+from .boost import boost_active, boost_end
+from .boost_control import async_start_boost, async_stop_boost
 from .light_control import async_update_lights_for_entry, cancel_pending_light_updates
 
 from .temperature_entities import TemperatureCurveSwitch
@@ -55,6 +58,7 @@ async def async_setup_entry(
         PeriodicLightsBedtimeSwitch(hass, entry.entry_id, name),
         PeriodicLightsTransitionOnTurnOnSwitch(hass, entry.entry_id, name),
         PeriodicLightsFixedMinSwitch(hass, entry.entry_id, name),
+        PeriodicLightsBoostSwitch(hass, entry.entry_id, name),
     ]
 
     @callback
@@ -354,6 +358,49 @@ class PeriodicLightsBedtimeSwitch(_BasePeriodicSwitch):
         self.async_write_ha_state()
         self.hass.async_create_task(async_update_lights_for_entry(self.hass, self._entry_id, force=True))
         async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
+
+
+class PeriodicLightsBoostSwitch(_BasePeriodicSwitch):
+    """Temporarily follow the boost shaping function and parameter."""
+
+    def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
+        super().__init__(hass, entry_id, setup_name)
+        self._attr_name = f"{setup_name} Boost"
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_boost"
+        self._attr_icon = "mdi:rocket-launch-outline"
+
+    def _data(self) -> dict[str, Any]:
+        return self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+
+    @property
+    def is_on(self) -> bool:
+        return boost_active(self._data())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        end = boost_end(self._data())
+        return {"ends_at": end.isoformat() if end is not None else None}
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        old_state = await self.async_get_last_state()
+        if old_state is None or old_state.state != "on":
+            return
+        ends_at = old_state.attributes.get("ends_at")
+        if ends_at is None:
+            async_start_boost(self.hass, self._entry_id, until=None, resume=True)
+            return
+        end = dt_util.parse_datetime(str(ends_at))
+        if end is not None and end > dt_util.utcnow():
+            async_start_boost(self.hass, self._entry_id, until=end.timestamp(), resume=True)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        async_start_boost(self.hass, self._entry_id)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        async_stop_boost(self.hass, self._entry_id)
+        self.async_write_ha_state()
 
 
 class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):

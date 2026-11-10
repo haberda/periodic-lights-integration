@@ -12,6 +12,8 @@ from .const import (
     MANUFACTURER,
     CONF_NAME,
     ATTR_SHAPING_FUNCTION,
+    ATTR_BOOST_SHAPING_FUNCTION,
+    DEFAULT_BOOST_SHAPING_FUNCTION,
     DEFAULT_SHAPING_FUNCTION,
 )
 from .light_control import async_update_lights_for_entry
@@ -41,8 +43,16 @@ async def async_setup_entry(
         TemperatureCurveSelect(hass, entry.entry_id, entry.title, 'temperature_shaping_function', 'Temperature Shaping Function'),
     ])
     setup_name = entry.data.get(CONF_NAME, entry.title)
-    entity = PeriodicLightsShapingFunctionSelect(hass, entry.entry_id, setup_name)
-    async_add_entities([entity])
+    async_add_entities([
+        PeriodicLightsShapingFunctionSelect(hass, entry.entry_id, setup_name),
+        PeriodicLightsShapingFunctionSelect(
+            hass, entry.entry_id, setup_name,
+            key=ATTR_BOOST_SHAPING_FUNCTION,
+            default=DEFAULT_BOOST_SHAPING_FUNCTION,
+            name_suffix="Boost Shaping Function",
+            unique_suffix="boost_shaping_function",
+        ),
+    ])
 
 
 class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
@@ -50,20 +60,29 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
 
     _attr_has_entity_name = True
 
-    def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry_id: str,
+        setup_name: str,
+        *,
+        key: str = ATTR_SHAPING_FUNCTION,
+        default: str = DEFAULT_SHAPING_FUNCTION,
+        name_suffix: str = "Shaping Function",
+        unique_suffix: str = "shaping_function",
+    ) -> None:
         self.hass = hass
         self._entry_id = entry_id
         self._setup_name = setup_name
+        self._key = key
 
-        self._attr_name = f"{setup_name} Shaping Function"
-        self._attr_unique_id = f"{DOMAIN}_{entry_id}_shaping_function"
+        self._attr_name = f"{setup_name} {name_suffix}"
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_{unique_suffix}"
         self._attr_options = list(ID_TO_LABEL.values())
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
-        current_id = data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
-        self._attr_current_option = ID_TO_LABEL.get(
-            current_id, ID_TO_LABEL[DEFAULT_SHAPING_FUNCTION]
-        )
+        current_id = data.get(key, default)
+        self._attr_current_option = ID_TO_LABEL.get(current_id, ID_TO_LABEL[default])
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -91,7 +110,7 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
-            data[ATTR_SHAPING_FUNCTION] = func_id
+            data[self._key] = func_id
 
         self._attr_current_option = option
         self.async_write_ha_state()
@@ -105,7 +124,7 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
 
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if data is not None:
-            data[ATTR_SHAPING_FUNCTION] = func_id
+            data[self._key] = func_id
 
         self._attr_current_option = option
         self.async_write_ha_state()

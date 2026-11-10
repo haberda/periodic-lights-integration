@@ -37,6 +37,7 @@ from .const import (
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_UPDATE_SENSORS,
 )
+from .boost import effective_settings
 from .curve_math import apply_shaping, map_pct_to_range
 from .solar_curve import SolarCycle, daily_pct
 
@@ -239,8 +240,9 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
         self._phase = phase
         self._solar_cycle = cycle
 
-        shaping_param = float(entry_data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
-        shaping_func = entry_data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
+        curve_settings = effective_settings(entry_data)
+        shaping_param = float(curve_settings.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
+        shaping_func = curve_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION)
 
         pct_shaped = apply_shaping(phase, shaping_func, shaping_param)
         self._pct_shaped = pct_shaped  # fraction in [0,1]
@@ -304,7 +306,9 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         return master and ct_enabled
 
     def _recalculate(self) -> None:
-        entry_data = temperature_curve_settings(self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}))
+        entry_data = temperature_curve_settings(
+            effective_settings(self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}))
+        )
 
         # Baseline daily phase
         phase, cycle = _compute_phase_with_optional_override(self.hass, entry_data)
@@ -381,9 +385,10 @@ class PeriodicLightsAdaptationSensor(SensorEntity):
     def extra_state_attributes(self):
         data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         phase, _ = _compute_phase_with_optional_override(self.hass, data)
-        shaped = apply_shaping(phase, data.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
-                               data.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
-        temperature_settings = temperature_curve_settings(data)
+        curve_settings = effective_settings(data)
+        shaped = apply_shaping(phase, curve_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
+                               curve_settings.get(ATTR_SHAPING_PARAM, DEFAULT_SHAPING_PARAM))
+        temperature_settings = temperature_curve_settings(curve_settings)
         temperature_phase, _ = _compute_phase_with_optional_override(self.hass, temperature_settings)
         temperature_shaped = apply_shaping(
             temperature_phase,
