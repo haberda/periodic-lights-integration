@@ -9,6 +9,12 @@ CONF_MAX_KELVIN = "max_kelvin"
 CONF_AREA_ID = "area_id"
 CONF_USE_HIDDEN = "use_hidden"
 CONF_LABEL_IDS = "label_ids"
+CONF_AREA_IDS = "area_ids"                      # list[str]; replaces the single area_id
+CONF_SELECTION_MODE = "selection_mode"          # how areas and labels combine
+CONF_EXCLUDE_AREA_IDS = "exclude_area_ids"      # list[str]
+CONF_EXCLUDE_LABEL_IDS = "exclude_label_ids"    # list[str]
+SELECTION_MODE_ANY = "any"   # in a selected area OR has a selected label
+SELECTION_MODE_ALL = "all"   # in a selected area AND has a selected label
 
 # Config stored in entry.data
 CONF_UPDATE_INTERVAL = "update_interval"  # seconds

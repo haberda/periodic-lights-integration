@@ -6,10 +6,13 @@
         "description": "Configure which lights and ranges this setup will control.",
         "data": {
           "name": "Setup name",
-          "area_id": "Choose area (optional)",
-          "label_ids": "Choose labels (optional)",
-          "use_hidden": "Include hidden lights from the area and labels",
-          "lights": "Choose lights (optional)",
+          "area_ids": "Areas (optional)",
+          "label_ids": "Labels (optional)",
+          "selection_mode": "When both areas and labels are chosen",
+          "exclude_area_ids": "Exclude areas (optional)",
+          "exclude_label_ids": "Exclude labels (optional)",
+          "use_hidden": "Include hidden lights from areas and labels",
+          "lights": "Additional lights (optional)",
           "min_brightness": "Minimum brightness (%)",
           "max_brightness": "Maximum brightness (%)",
           "min_kelvin": "Minimum color temperature (K)",
@@ -17,11 +20,17 @@
           "update_interval": "Update interval (seconds)",
           "transition": "Transition time (seconds)",
           "debounce_delay": "Debounce delay (seconds)"
+        },
+        "data_description": {
+          "selection_mode": "Choose whether a light needs a chosen area or a chosen label, or both.",
+          "exclude_area_ids": "Lights in these areas are left out, even if a label includes them.",
+          "exclude_label_ids": "Lights with these labels are left out, even if an area includes them.",
+          "lights": "Always included, regardless of the exclusions above."
         }
       }
     },
     "error": {
-      "no_lights": "No lights to control. Select lights, an area, or labels that include lights. Lights that only support on/off can't be adapted and are skipped.",
+      "no_lights": "No lights to control. Select lights, areas, or labels that include lights, and check that the exclusions don't remove them all. Lights that only support on/off can't be adapted and are skipped.",
       "brightness_out_of_range": "Brightness must be between 0 and 100%.",
       "min_brightness_greater_than_max": "Minimum brightness cannot be greater than maximum brightness.",
       "kelvin_out_of_range": "Color temperature must be between 1500 K and 6500 K.",
@@ -37,15 +46,24 @@
         "title": "Periodic Lights options",
         "description": "Update which lights this setup controls.",
         "data": {
-          "area_id": "Choose area (optional)",
-          "label_ids": "Choose labels (optional)",
-          "use_hidden": "Include hidden lights from the area and labels",
-          "lights": "Choose lights (optional)"
+          "area_ids": "Areas (optional)",
+          "label_ids": "Labels (optional)",
+          "selection_mode": "When both areas and labels are chosen",
+          "exclude_area_ids": "Exclude areas (optional)",
+          "exclude_label_ids": "Exclude labels (optional)",
+          "use_hidden": "Include hidden lights from areas and labels",
+          "lights": "Additional lights (optional)"
+        },
+        "data_description": {
+          "selection_mode": "Choose whether a light needs a chosen area or a chosen label, or both.",
+          "exclude_area_ids": "Lights in these areas are left out, even if a label includes them.",
+          "exclude_label_ids": "Lights with these labels are left out, even if an area includes them.",
+          "lights": "Always included, regardless of the exclusions above."
         }
       }
     },
     "error": {
-      "no_lights": "No lights to control. Select lights, an area, or labels that include lights. Lights that only support on/off can't be adapted and are skipped."
+      "no_lights": "No lights to control. Select lights, areas, or labels that include lights, and check that the exclusions don't remove them all. Lights that only support on/off can't be adapted and are skipped."
     }
   },
   "entity": {
@@ -60,6 +78,14 @@
           "controls_disabled": "Controls disabled",
           "light_unavailable": "Light unavailable"
         }
+      }
+    }
+  },
+  "selector": {
+    "selection_mode": {
+      "options": {
+        "any": "Any: in a chosen area or has a chosen label",
+        "all": "All: in a chosen area and has a chosen label"
       }
     }
   }

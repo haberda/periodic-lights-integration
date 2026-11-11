@@ -60,8 +60,13 @@ class LabelResolutionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.selection = load_runtime().package.light_selection
         self.hass = SimpleNamespace(states=SimpleNamespace(get=lambda eid: None))
-        self.selection.async_get_lights_in_area = AsyncMock(return_value=['light.area'])
-        self.selection.async_get_lights_with_labels = AsyncMock(return_value=['light.label'])
+        entities = {e.entity_id: e for e in (
+            entity('light.area', area_id='den'),
+            entity('light.label', labels={'reading'}),
+            entity('light.unrelated'),
+        )}
+        self.selection.er.async_get.return_value = SimpleNamespace(entities=entities)
+        self.selection.dr.async_get.return_value = SimpleNamespace(async_get={}.get)
 
     async def test_labels_add_to_manual_and_area_lights(self):
         entry = SimpleNamespace(
@@ -76,7 +81,6 @@ class LabelResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_entries_without_labels_are_unchanged(self):
         entry = SimpleNamespace(data={'manual_lights': ['light.desk']}, options={})
         self.assertEqual(await self.selection.async_resolve_entry_lights(self.hass, entry), ['light.desk'])
-        self.selection.async_get_lights_with_labels.assert_not_called()
 
     async def test_labels_cleared_in_options_stay_cleared(self):
         entry = SimpleNamespace(

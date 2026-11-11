@@ -23,7 +23,7 @@ from .const import (
     CONF_MAX_BRIGHTNESS,
     CONF_MIN_KELVIN,
     CONF_MAX_KELVIN,
-    CONF_AREA_ID,
+    CONF_AREA_IDS,
     CONF_USE_HIDDEN,
     CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
@@ -67,10 +67,8 @@ from .const import (
 )
 from .boost_control import cancel_boost_timer
 from .light_selection import (
+    SelectionRules,
     async_resolve_entry_lights,
-    entry_area_id,
-    entry_label_ids,
-    entry_use_hidden,
     get_effective,
 )
 from .light_control import async_update_lights_for_entry, cancel_pending_light_updates, layered_group_owner
@@ -228,13 +226,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # IMPORTANT: match what switch.py listens for
         async_dispatcher_send(hass, f"{SIGNAL_REFRESH_ENTITIES}_{entry.entry_id}")
 
-    area_val = entry_area_id(entry)
-    use_hidden = entry_use_hidden(entry)
+    selection_rules = SelectionRules.from_entry(entry)
     effective_lights = await async_resolve_entry_lights(hass, entry)
 
     entry_state: dict[str, Any] = {
-        CONF_AREA_ID: area_val,
-        CONF_USE_HIDDEN: use_hidden,
+        CONF_AREA_IDS: list(selection_rules.area_ids),
+        CONF_USE_HIDDEN: selection_rules.include_hidden,
         CONF_LIGHTS: effective_lights,
         CONF_MIN_BRIGHTNESS: get_effective(entry, CONF_MIN_BRIGHTNESS, 0),
         CONF_MAX_BRIGHTNESS: get_effective(entry, CONF_MAX_BRIGHTNESS, 100),
@@ -549,7 +546,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
 
     # ---- Keep area and label membership current when registries change ----
-    if area_val or entry_label_ids(entry):
+    if selection_rules.selects_anything:
         cancel_registry_refresh = None
 
         @callback

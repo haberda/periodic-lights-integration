@@ -107,27 +107,33 @@ class AreaRegistryRefreshTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.registry_timers()[-1].cancelled)
 
 
+def _light(entity_id, area_id=None):
+    return SimpleNamespace(
+        entity_id=entity_id, domain='light', area_id=area_id, device_id=None, hidden_by=None, labels=set(),
+    )
+
+
 class LightSelectionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.selection = load_runtime().package.light_selection
+        entities = [_light('light.area', 'den'), _light('light.onoff', 'den'), _light('light.elsewhere', 'hall')]
+        self.selection.er.async_get.return_value = SimpleNamespace(entities={e.entity_id: e for e in entities})
+        self.selection.dr.async_get.return_value = SimpleNamespace(async_get={}.get)
+        states = {'light.onoff': SimpleNamespace(attributes={'supported_color_modes': ['onoff']})}
+        self.hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
+
     async def test_manual_and_area_lights_are_combined_and_filtered(self):
-        selection = load_runtime().package.light_selection
-        states = {
-            'light.onoff': SimpleNamespace(attributes={'supported_color_modes': ['onoff']}),
-        }
-        hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
-        selection.async_get_lights_in_area = AsyncMock(return_value=['light.area', 'light.onoff'])
         entry = SimpleNamespace(
             data={'manual_lights': ['light.desk', 'light.onoff'], 'area_id': 'den'},
             options={},
         )
-        self.assertEqual(await selection.async_resolve_entry_lights(hass, entry), ['light.area', 'light.desk'])
+        self.assertEqual(
+            await self.selection.async_resolve_entry_lights(self.hass, entry), ['light.area', 'light.desk']
+        )
 
     async def test_cleared_area_sentinel_means_no_area(self):
-        selection = load_runtime().package.light_selection
-        hass = SimpleNamespace(states=SimpleNamespace(get=lambda eid: None))
-        selection.async_get_lights_in_area = AsyncMock(return_value=['light.area'])
         entry = SimpleNamespace(data={'area_id': 'den'}, options={'area_id': '__cleared__', 'manual_lights': []})
-        self.assertEqual(await selection.async_resolve_entry_lights(hass, entry), [])
-        selection.async_get_lights_in_area.assert_not_called()
+        self.assertEqual(await self.selection.async_resolve_entry_lights(self.hass, entry), [])
 
 
 class StateParsingTests(unittest.TestCase):

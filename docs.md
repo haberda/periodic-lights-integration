@@ -19,10 +19,13 @@ All parameters are accessible through the built-in config flow and the entities 
 | Parameter | Description |
 |----------|-------------|
 | **Setup Name** | A friendly name for the lighting setup. |
-| **Choose Area (optional)** | Allows selecting an HA Area; lights in that area are automatically added. Area membership is re-checked a couple of seconds after lights or devices are added, removed, or moved between areas, so no reconfiguration is needed. |
-| **Choose Labels (optional)** | Adds every light that has one of the selected labels, either on the light itself or on its device. This is how Home Assistant resolves a label target in a service call. Like the area, label membership is re-checked shortly after labels change. |
-| **Include Hidden Lights from the Area and Labels** | Includes hidden light entities when collecting area and label lights. |
-| **Choose Lights (optional)** | Manually select individual lights. |
+| **Areas (optional)** | Adds the lights in one or more HA areas. A light's area is its own, or its device's if it has none. |
+| **Labels (optional)** | Adds lights that have any of the selected labels, on the light itself or on its device. This is how Home Assistant resolves a label target in a service call. |
+| **When both areas and labels are chosen** | **Any** includes a light that is in a chosen area or has a chosen label. **All** includes only lights that are in a chosen area and have a chosen label. See [Choosing lights with areas and labels](#choosing-lights-with-areas-and-labels). |
+| **Exclude areas (optional)** | Leaves out lights in these areas, even if a label includes them. |
+| **Exclude labels (optional)** | Leaves out lights with these labels, even if an area includes them. |
+| **Include hidden lights from areas and labels** | Includes hidden light entities when collecting area and label lights. |
+| **Additional lights (optional)** | Individual lights to include. These are always included, regardless of the exclusions. |
 | **Minimum Brightness (%)** | Lowest brightness curve value. |
 | **Maximum Brightness (%)** | Highest brightness curve value. |
 | **Minimum Color Temperature (K)** | Warmest kelvin. |
@@ -30,6 +33,28 @@ All parameters are accessible through the built-in config flow and the entities 
 | **Update Interval (s)** | How often to push updates to lights. |
 | **Transition Time (s)** | How long lights fade when updated. |
 | **Debounce Delay (s)** | How long to wait after a light turns on before adapting. Lights that turn on within this window (for example, from a scene) are adapted together in one update. Default 0.3 s; 0 adapts each light immediately. |
+
+### Choosing lights with areas and labels
+
+Areas, labels, the match setting, and the exclusions combine into one rule. The
+examples use a `lamps` label on every lamp in the house.
+
+| Goal | Areas | Labels | Match | Exclude |
+|------|-------|--------|-------|---------|
+| Every light in two rooms | Living room, Kitchen | | Any | |
+| Only the lamps in two rooms | Living room, Kitchen | lamps | All | |
+| Every light in two rooms, plus every lamp in the house | Living room, Kitchen | lamps | Any | |
+| Two rooms without their lamps | Living room, Kitchen | | Any | Labels: lamps |
+| Every lamp except the bedroom's | | lamps | Any | Areas: Bedroom |
+
+- With only areas or only labels chosen, the match setting makes no difference.
+- Exclusions apply to lights found through areas and labels. Lights listed under
+  **Additional lights** are always included.
+- Lights that only support on/off are skipped.
+- Membership is re-checked a couple of seconds after lights or devices are added,
+  removed, relabeled, or moved between areas, so no reconfiguration is needed.
+- Setups created before multiple areas were supported keep their single area and
+  their lights. They behave as before until you change the options.
 
 ### Controls and entities
 

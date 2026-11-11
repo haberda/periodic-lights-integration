@@ -54,7 +54,7 @@ def load_runtime():
     module('homeassistant.exceptions', HomeAssistantError=type('HomeAssistantError', (Exception,), {}))
     module('homeassistant.const', EVENT_HOMEASSISTANT_STARTED='started')
     module('homeassistant.helpers')
-    module('homeassistant.helpers.selector')
+    module('homeassistant.helpers.selector', selector=lambda config: config)
     module('homeassistant.helpers.device_registry', async_get=Mock(), EVENT_DEVICE_REGISTRY_UPDATED='device_registry_updated')
     module('homeassistant.helpers.entity_registry', async_get=Mock(), EVENT_ENTITY_REGISTRY_UPDATED='entity_registry_updated')
     module('homeassistant.helpers.dispatcher', async_dispatcher_send=Mock(), async_dispatcher_connect=Mock())

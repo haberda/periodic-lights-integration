@@ -13,8 +13,9 @@ All integration code lives in `custom_components/periodic_lights/`:
 - `__init__.py`: config-entry lifecycle, runtime state, scheduling, light listeners,
   and manual override detection.
 - `config_flow.py`: setup/options UI.
-- `light_selection.py`: on/off-only filtering, area lookup, and resolving an entry's
-  manual and area lights. Shared by setup, the registry refresh, and the config flow.
+- `light_selection.py`: on/off-only filtering, `SelectionRules` (areas, labels,
+  match mode, exclusions), and resolving an entry's lights. Shared by setup, the
+  registry refresh, and the config flow. Older entries store a single `area_id`.
 - `light_control.py`: eligibility, per-light targets, batching, split commands,
   redundant-command suppression, and Layered Lights ownership.
 - `curve_math.py`, `solar_curve.py`, `curve_model.py`: shaping functions, solar

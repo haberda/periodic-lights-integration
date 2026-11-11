@@ -8,6 +8,9 @@
   brighten the evening when guests arrive. Lights keep adapting, transitioning and
   respecting overrides. Boost ends after a set duration (default 120 minutes) or when
   turned off, and resumes after a restart if it hasn't ended.
+- Choose several areas for a setup, combine areas with labels (a light in a chosen area
+  or with a chosen label, or only lights that have both), and exclude areas or labels.
+  Setups with a single area keep working unchanged.
 
 ## 0.1.1
 
