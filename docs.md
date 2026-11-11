@@ -60,6 +60,12 @@ examples use a `lamps` label on every lamp in the house.
 
 When setup completes, you get multiple controls grouped under one device:
 
+Entities are named after their function, and Home Assistant adds the setup name in
+front, for example `switch.dining_room_boost`. Versions before 0.2.0 could create IDs
+with the setup name repeated. Existing IDs are never changed automatically; to
+rename them, open the setup's device page, choose the three-dot menu, and select
+**Recreate entity IDs**, then update dashboards and automations that use the old IDs.
+
 #### Switches
 
 | Entity | Function |

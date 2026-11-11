@@ -40,6 +40,7 @@ def load_runtime():
     module('homeassistant.components.sensor', SensorEntity=Entity, SensorDeviceClass=SimpleNamespace(ENUM='enum'))
     module('homeassistant.components.switch', SwitchEntity=Entity, SwitchDeviceClass=SimpleNamespace(SWITCH='switch'))
     module('homeassistant.components.select', SelectEntity=Entity)
+    module('homeassistant.components.button', ButtonEntity=Entity)
     module('homeassistant.components.time', TimeEntity=Entity)
     module('homeassistant.components.number', NumberEntity=Entity, NumberMode=SimpleNamespace(BOX='box'))
     module('homeassistant.helpers.entity', DeviceInfo=dict, EntityCategory=SimpleNamespace(DIAGNOSTIC='diagnostic'))
@@ -66,7 +67,7 @@ def load_runtime():
            parse_datetime=lambda value: datetime.fromisoformat(value))
     package = module('review_periodic_lights', __path__=[str(ROOT)])
     with patch.dict(sys.modules, modules):
-        for name in ('const', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'boost', 'light_control', 'boost_control', 'temperature_entities', 'number', 'light_selection', 'config_flow', 'sensor', 'switch', 'select', 'time', 'preview', 'image'):
+        for name in ('const', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'boost', 'light_control', 'boost_control', 'temperature_entities', 'number', 'light_selection', 'config_flow', 'sensor', 'switch', 'select', 'time', 'button', 'preview', 'image'):
             spec = importlib.util.spec_from_file_location(f'{package.__name__}.{name}', ROOT / f'{name}.py')
             loaded = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = loaded

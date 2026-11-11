@@ -42,7 +42,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up number (input) entities for a config entry."""
     async_add_entities([
-        TemperatureCurveNumber(hass, entry.entry_id, entry.title, 'temperature_shaping_param', 'Temperature Shaping Parameter'),
+        TemperatureCurveNumber(hass, entry.entry_id, entry.title, 'temperature_shaping_param', 'Temperature shaping parameter'),
     ])
     all_data = hass.data[DOMAIN][entry.entry_id]
     setup_name = entry.data.get(CONF_NAME, entry.title)
@@ -85,6 +85,8 @@ async def async_setup_entry(
 class _BasePeriodicNumber(RestoreEntity, NumberEntity):
     """Base class for Periodic Lights global number inputs."""
 
+    # The device carries the setup name; entity names must not repeat it.
+    _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX  # input field
 
     def __init__(
@@ -101,7 +103,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         self._setup_name = setup_name
         self._key = key
 
-        self._attr_name = f"{setup_name} {name_suffix}"
+        self._attr_name = name_suffix
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{unique_suffix}"
 
         # Initial value from hass.data (seeded in __init__.py)
@@ -162,6 +164,8 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
 class _BasePerLightNumber(RestoreEntity, NumberEntity):
     """Base class for per-light number inputs."""
 
+    # Named from the light alone; the device carries the setup name.
+    _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX  # input field
     _attr_entity_registry_enabled_default = False  # disabled until explicitly enabled
 
@@ -189,7 +193,7 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
         else:
             light_name = light_id
 
-        self._attr_name = f"{setup_name} [{light_name}] {name_suffix}"
+        self._attr_name = f"{light_name} {name_suffix}"
 
         safe_light_id = light_id.replace(".", "_")
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{safe_light_id}_{unique_suffix}"
@@ -275,7 +279,7 @@ class PeriodicLightsMinBrightnessNumber(_BasePeriodicNumber):
             entry_id,
             setup_name,
             CONF_MIN_BRIGHTNESS,
-            "Minimum Brightness",
+            "Minimum brightness",
             "min_brightness",
         )
 
@@ -294,7 +298,7 @@ class PeriodicLightsMaxBrightnessNumber(_BasePeriodicNumber):
             entry_id,
             setup_name,
             CONF_MAX_BRIGHTNESS,
-            "Maximum Brightness",
+            "Maximum brightness",
             "max_brightness",
         )
 
@@ -313,7 +317,7 @@ class PeriodicLightsMinKelvinNumber(_BasePeriodicNumber):
             entry_id,
             setup_name,
             CONF_MIN_KELVIN,
-            "Minimum Color Temperature",
+            "Minimum color temperature",
             "min_kelvin",
         )
 
@@ -332,7 +336,7 @@ class PeriodicLightsMaxKelvinNumber(_BasePeriodicNumber):
             entry_id,
             setup_name,
             CONF_MAX_KELVIN,
-            "Maximum Color Temperature",
+            "Maximum color temperature",
             "max_kelvin",
         )
 
@@ -351,7 +355,7 @@ class PeriodicLightsUpdateIntervalNumber(_BasePeriodicNumber):
             entry_id,
             setup_name,
             CONF_UPDATE_INTERVAL,
-            "Update Interval",
+            "Update interval",
             "update_interval",
         )
 
@@ -388,7 +392,7 @@ class PeriodicLightsShapingParamNumber(_BasePeriodicNumber):
             entry_id,
             setup_name,
             ATTR_SHAPING_PARAM,
-            "Shaping Parameter",
+            "Shaping parameter",
             "shaping_param",
         )
 
@@ -411,7 +415,7 @@ class PeriodicLightsBoostShapingParamNumber(PeriodicLightsShapingParamNumber):
             entry_id,
             setup_name,
             ATTR_BOOST_SHAPING_PARAM,
-            "Boost Shaping Parameter",
+            "Boost shaping parameter",
             "boost_shaping_param",
         )
 
@@ -430,7 +434,7 @@ class PeriodicLightsBoostDurationNumber(_BasePeriodicNumber):
             entry_id,
             setup_name,
             ATTR_BOOST_DURATION,
-            "Boost Duration",
+            "Boost duration",
             "boost_duration",
         )
 
@@ -460,7 +464,7 @@ class PerLightMinBrightnessNumber(_BasePerLightNumber):
             light_id,
             key=CONF_MIN_BRIGHTNESS,
             global_key=CONF_MIN_BRIGHTNESS,
-            name_suffix="Min Brightness",
+            name_suffix="min brightness",
             unique_suffix="perlight_min_brightness",
         )
 
@@ -487,7 +491,7 @@ class PerLightMaxBrightnessNumber(_BasePerLightNumber):
             light_id,
             key=CONF_MAX_BRIGHTNESS,
             global_key=CONF_MAX_BRIGHTNESS,
-            name_suffix="Max Brightness",
+            name_suffix="max brightness",
             unique_suffix="perlight_max_brightness",
         )
 
@@ -514,7 +518,7 @@ class PerLightMinKelvinNumber(_BasePerLightNumber):
             light_id,
             key=CONF_MIN_KELVIN,
             global_key=CONF_MIN_KELVIN,
-            name_suffix="Min Color Temp",
+            name_suffix="min color temp",
             unique_suffix="perlight_min_kelvin",
         )
 
@@ -541,6 +545,6 @@ class PerLightMaxKelvinNumber(_BasePerLightNumber):
             light_id,
             key=CONF_MAX_KELVIN,
             global_key=CONF_MAX_KELVIN,
-            name_suffix="Max Color Temp",
+            name_suffix="max color temp",
             unique_suffix="perlight_max_kelvin",
         )

@@ -44,7 +44,7 @@ async def async_setup_entry(
 ) -> None:
     async_add_entities([
         TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'separate_temperature_curve', 'Use separate temperature curve'),
-        TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'temperature_use_fixed_min_time', 'Temperature Use Fixed Minimum Time'),
+        TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'temperature_use_fixed_min_time', 'Temperature use fixed minimum time'),
     ])
     data = entry.data
     name = data.get(CONF_NAME, entry.title)
@@ -77,6 +77,8 @@ async def async_setup_entry(
 
 
 class _BasePeriodicSwitch(RestoreEntity, SwitchEntity):
+    # The device carries the setup name; entity names must not repeat it.
+    _attr_has_entity_name = True
     _attr_device_class = SwitchDeviceClass.SWITCH
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
@@ -103,7 +105,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str, lights: list[str]) -> None:
         super().__init__(hass, entry_id, setup_name)
         self._lights = lights
-        self._attr_name = f"{setup_name} Enabled"
+        self._attr_name = "Enabled"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_enabled"
 
     def _name_for(self, entity_id: str) -> str:
@@ -226,7 +228,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
 class PeriodicLightsBrightnessSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Brightness Updates"
+        self._attr_name = "Brightness updates"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_brightness_enabled"
 
     async def async_added_to_hass(self) -> None:
@@ -258,7 +260,7 @@ class PeriodicLightsBrightnessSwitch(_BasePeriodicSwitch):
 class PeriodicLightsColorTempSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Color Temp Updates"
+        self._attr_name = "Color temp updates"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_color_temp_enabled"
 
     async def async_added_to_hass(self) -> None:
@@ -297,7 +299,7 @@ class PeriodicLightsSplitServiceCallsSwitch(_BasePeriodicSwitch):
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Split brightness/color updates"
+        self._attr_name = "Split brightness/color updates"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_split_service_calls"
 
     async def async_added_to_hass(self) -> None:
@@ -330,7 +332,7 @@ class PeriodicLightsSplitServiceCallsSwitch(_BasePeriodicSwitch):
 class PeriodicLightsBedtimeSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Bedtime"
+        self._attr_name = "Bedtime"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_bedtime"
 
     async def async_added_to_hass(self) -> None:
@@ -365,7 +367,7 @@ class PeriodicLightsBoostSwitch(_BasePeriodicSwitch):
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Boost"
+        self._attr_name = "Boost"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_boost"
         self._attr_icon = "mdi:rocket-launch-outline"
 
@@ -406,7 +408,7 @@ class PeriodicLightsBoostSwitch(_BasePeriodicSwitch):
 class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Transition when light turns on"
+        self._attr_name = "Transition when light turns on"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_transition_on_turn_on"
 
     async def async_added_to_hass(self) -> None:
@@ -438,7 +440,7 @@ class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
 class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Use Fixed Minimum Time"
+        self._attr_name = "Use fixed minimum time"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_use_fixed_min_time"
 
     async def async_added_to_hass(self) -> None:

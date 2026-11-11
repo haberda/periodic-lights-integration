@@ -222,7 +222,7 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
         name: str,
     ) -> None:
         super().__init__(hass, entry_id, name)
-        self._attr_name = f"{name} Desired Brightness"
+        self._attr_name = "Desired brightness"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_desired_brightness"
         self._attr_native_value: float | None = None
 
@@ -295,7 +295,7 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         name: str,
     ) -> None:
         super().__init__(hass, entry_id, name)
-        self._attr_name = f"{name} Desired Color Temperature"
+        self._attr_name = "Desired color temperature"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_desired_color_temp"
         self._attr_native_value: float | None = None
 
@@ -363,7 +363,7 @@ class PeriodicLightsAdaptationSensor(SensorEntity):
         self._setup_name = setup_name
         self._light_id = light_id
         state = hass.states.get(light_id)
-        self._attr_name = f"{state.name if state else light_id} Adaptation"
+        self._attr_name = f"{state.name if state else light_id} adaptation"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{light_id}_adaptation"
 
     @property

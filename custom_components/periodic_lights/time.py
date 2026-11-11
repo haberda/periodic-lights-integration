@@ -29,7 +29,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the fixed minimum time entity for a config entry."""
     async_add_entities([
-        TemperatureCurveTime(hass, entry.entry_id, entry.title, 'temperature_fixed_min_time', 'Temperature Fixed Minimum Time'),
+        TemperatureCurveTime(hass, entry.entry_id, entry.title, 'temperature_fixed_min_time', 'Temperature fixed minimum time'),
     ])
     name = entry.data.get(CONF_NAME, entry.title)
     async_add_entities(
@@ -46,6 +46,9 @@ async def async_setup_entry(
 class PeriodicLightsFixedMinTimeEntity(RestoreEntity, TimeEntity):
     """Time-only entity for selecting the daily minimum brightness time."""
 
+    # The device carries the setup name; entity names must not repeat it.
+    _attr_has_entity_name = True
+
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         self.hass = hass
         self._entry_id = entry_id
@@ -54,7 +57,7 @@ class PeriodicLightsFixedMinTimeEntity(RestoreEntity, TimeEntity):
         # Internal storage as datetime.time
         self._time: dt_time | None = None
 
-        self._attr_name = f"{setup_name} Fixed Minimum Time"
+        self._attr_name = "Fixed minimum time"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_fixed_min_time"
 
     @property

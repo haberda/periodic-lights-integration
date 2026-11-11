@@ -40,7 +40,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up select entities for a config entry."""
     async_add_entities([
-        TemperatureCurveSelect(hass, entry.entry_id, entry.title, 'temperature_shaping_function', 'Temperature Shaping Function'),
+        TemperatureCurveSelect(hass, entry.entry_id, entry.title, 'temperature_shaping_function', 'Temperature shaping function'),
     ])
     setup_name = entry.data.get(CONF_NAME, entry.title)
     async_add_entities([
@@ -49,7 +49,7 @@ async def async_setup_entry(
             hass, entry.entry_id, setup_name,
             key=ATTR_BOOST_SHAPING_FUNCTION,
             default=DEFAULT_BOOST_SHAPING_FUNCTION,
-            name_suffix="Boost Shaping Function",
+            name_suffix="Boost shaping function",
             unique_suffix="boost_shaping_function",
         ),
     ])
@@ -68,7 +68,7 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
         *,
         key: str = ATTR_SHAPING_FUNCTION,
         default: str = DEFAULT_SHAPING_FUNCTION,
-        name_suffix: str = "Shaping Function",
+        name_suffix: str = "Shaping function",
         unique_suffix: str = "shaping_function",
     ) -> None:
         self.hass = hass
@@ -76,7 +76,7 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
         self._setup_name = setup_name
         self._key = key
 
-        self._attr_name = f"{setup_name} {name_suffix}"
+        self._attr_name = name_suffix
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{unique_suffix}"
         self._attr_options = list(ID_TO_LABEL.values())
 
