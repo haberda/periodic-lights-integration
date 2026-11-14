@@ -79,7 +79,7 @@ def load_runtime():
     module('homeassistant.helpers.restore_state', RestoreEntity=RestoreEntity)
     core_state = SimpleNamespace(running='running', starting='starting')
     module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object,
-           callback=lambda fn: fn, CoreState=core_state)
+           callback=lambda fn: fn, CoreState=core_state, Event=object)
 
     def async_at_started(hass, at_start_cb):
         """Run now when started; otherwise park the callback for the test to fire."""

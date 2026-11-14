@@ -25,7 +25,7 @@ from .const import (
     ATTR_SHAPING_PARAM,
 )
 from .runtime import get_entry_data
-from .entity import PeriodicLightsEntity
+from .entity import PeriodicLightsEntity, PeriodicLightsLightEntity
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .const import SIGNAL_REFRESH_ENTITIES
 
@@ -152,7 +152,7 @@ class _BasePeriodicNumber(PeriodicLightsEntity, RestoreEntity, NumberEntity):
         async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
 
-class _BasePerLightNumber(PeriodicLightsEntity, RestoreEntity, NumberEntity):
+class _BasePerLightNumber(PeriodicLightsLightEntity, RestoreEntity, NumberEntity):
     """Base class for per-light number inputs."""
 
     # Named from the light alone; the device carries the setup name.
@@ -178,13 +178,7 @@ class _BasePerLightNumber(PeriodicLightsEntity, RestoreEntity, NumberEntity):
         self._key = key
         self._global_key = global_key
 
-        state = self.hass.states.get(light_id)
-        if state is not None:
-            light_name = state.name
-        else:
-            light_name = light_id
-
-        self._attr_name = f"{light_name} {name_suffix}"
+        self._set_light_name(name_suffix)
 
         safe_light_id = light_id.replace(".", "_")
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{safe_light_id}_{unique_suffix}"

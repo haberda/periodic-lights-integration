@@ -37,7 +37,7 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
 )
 from .runtime import get_entry_data
-from .entity import PeriodicLightsEntity
+from .entity import PeriodicLightsEntity, PeriodicLightsLightEntity
 from .boost import effective_settings
 from .curve_math import apply_shaping, map_pct_to_range
 from .solar_curve import SolarCycle, daily_pct
@@ -338,7 +338,7 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         return attrs
 
 
-class PeriodicLightsAdaptationSensor(PeriodicLightsEntity, SensorEntity):
+class PeriodicLightsAdaptationSensor(PeriodicLightsLightEntity, SensorEntity):
     """Explain why a configured light is or is not being updated."""
 
     _attr_has_entity_name = True
@@ -354,8 +354,7 @@ class PeriodicLightsAdaptationSensor(PeriodicLightsEntity, SensorEntity):
         self._entry_id = entry_id
         self._setup_name = setup_name
         self._light_id = light_id
-        state = hass.states.get(light_id)
-        self._attr_name = f"{state.name if state else light_id} adaptation"
+        self._set_light_name("adaptation")
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{light_id}_adaptation"
 
 
