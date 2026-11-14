@@ -26,6 +26,14 @@ YAML or file editing required for setup.
 After setup, open the integration’s device page to adjust its controls.
 See the [configuration reference](docs.md#configuration) for individual options.
 
+## Removal
+
+1. Open **Settings → Devices & Services → Periodic Lights**.
+2. For each setup, open the three-dot menu and choose **Delete**. This removes the
+   setup's device and all of its entities. Your lights keep their current state.
+3. To uninstall completely, delete `config/custom_components/periodic_lights/` (or
+   remove the repository in HACS) and restart Home Assistant.
+
 ## How it works
 
 A daily curve maps the time of day to your configured brightness and color

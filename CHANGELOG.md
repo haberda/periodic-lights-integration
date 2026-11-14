@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Internal changes toward the Home Assistant quality scale's Bronze tier: runtime state
+  lives in `ConfigEntry.runtime_data`, entities share one base class, and the config and
+  options flows are fully covered by tests that run inside Home Assistant.
+- The setup form no longer carries range checks that its number fields already enforce.
+- The README explains how to remove the integration.
+
 ## 0.2.0
 
 ### Added
