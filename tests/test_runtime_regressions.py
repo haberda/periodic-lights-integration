@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class SplitUpdateTests(unittest.IsolatedAsyncioTestCase):
@@ -17,7 +17,7 @@ class SplitUpdateTests(unittest.IsolatedAsyncioTestCase):
         async def call(domain, service, payload, **kwargs):
             self.calls.append((service, payload))
         self.hass = SimpleNamespace(
-            data={'periodic_lights': {'entry': self.data}},
+            config_entries=FakeConfigEntries({'entry': self.data}),
             states=SimpleNamespace(get=lambda eid: self.state),
             services=SimpleNamespace(async_call=call),
         )
@@ -38,7 +38,7 @@ class SplitUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.calls), 1)
 
     async def test_reloaded_entry_skips_old_color_step(self):
-        await self.update_during(lambda: self.hass.data['periodic_lights'].update(entry=dict(self.data)))
+        await self.update_during(lambda: self.hass.config_entries.set_runtime('entry', dict(self.data)))
         self.assertEqual(len(self.calls), 1)
 
     async def test_color_control_disabled_during_transition(self):
@@ -82,12 +82,13 @@ class OverrideTests(unittest.IsolatedAsyncioTestCase):
             add_update_listener=lambda fn: lambda: None,
         )
         self.hass = SimpleNamespace(
-            data={}, is_running=True,
+            is_running=True,
             states=SimpleNamespace(get=lambda eid: self.state(50)),
-            config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock()),
+            config_entries=FakeConfigEntries(async_forward_entry_setups=AsyncMock()),
         )
+        self.hass.config_entries.add(self.entry)
         await self.integration.async_setup_entry(self.hass, self.entry)
-        self.data = self.hass.data['periodic_lights']['entry']
+        self.data = self.hass.config_entries.async_get_entry('entry').runtime_data
         self.data['pl_override_detection_ready'] = True
         self.expected = {
             'until': 200, 'brightness_pct': 100, 'start_brightness_pct': 20,
@@ -165,7 +166,13 @@ class SchedulingTests(unittest.IsolatedAsyncioTestCase):
         self.hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
         await self.integration.async_unload_entry(self.hass, self.entry)
         cancel.assert_called_once_with()
-        self.assertNotIn('periodic_lights', self.hass.data)
+
+    async def test_update_after_unload_sends_nothing(self):
+        # Home Assistant drops runtime_data once the unload succeeds.
+        self.hass.config_entries.unload('entry')
+        self.hass.services = SimpleNamespace(async_call=AsyncMock())
+        await self.runtime.control.async_update_lights_for_entry(self.hass, 'entry', force=True)
+        self.hass.services.async_call.assert_not_awaited()
 
 
 class AreaSelectionTests(unittest.IsolatedAsyncioTestCase):

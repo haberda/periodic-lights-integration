@@ -35,3 +35,15 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_runtime*.py'
       - name: Lint
         run: ruff check --select E9,F821,F822,F823 custom_components tests
+
+  homeassistant-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Home Assistant test harness
+        run: pip install pytest-homeassistant-custom-component
+      - name: Tests inside Home Assistant
+        run: pytest --cov=custom_components.periodic_lights --cov-report=term-missing

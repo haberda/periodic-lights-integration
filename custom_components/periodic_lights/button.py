@@ -5,7 +5,6 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -16,9 +15,10 @@ from .const import (
     DOMAIN,
     CONF_NAME,
     CONF_LIGHTS,
-    MANUFACTURER,
     SIGNAL_REFRESH_ENTITIES,
 )
+from .runtime import get_entry_data
+from .entity import PeriodicLightsEntity
 from .light_control import async_update_lights_for_entry
 
 async def async_setup_entry(
@@ -30,7 +30,7 @@ async def async_setup_entry(
     async_add_entities([PeriodicLightsClearOverridesButton(hass, entry.entry_id, name)])
 
 
-class PeriodicLightsClearOverridesButton(ButtonEntity):
+class PeriodicLightsClearOverridesButton(PeriodicLightsEntity, ButtonEntity):
     _attr_has_entity_name = True
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
@@ -42,14 +42,6 @@ class PeriodicLightsClearOverridesButton(ButtonEntity):
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_clear_overrides"
         self._attr_icon = "mdi:restore"
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     def _name_for(self, entity_id: str) -> str:
         st = self.hass.states.get(entity_id)
@@ -65,7 +57,7 @@ class PeriodicLightsClearOverridesButton(ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        state = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        state = get_entry_data(self.hass, self._entry_id)
         if not state:
             return
 

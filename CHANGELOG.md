@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed
+
+- Internal changes toward the Home Assistant quality scale's Bronze tier: runtime state
+  lives in `ConfigEntry.runtime_data`, entities share one base class, and the config and
+  options flows are fully covered by tests that run inside Home Assistant.
+- The setup form no longer carries range checks that its number fields already enforce.
+- The README explains how to remove the integration.
+
+## 0.2.0
+
 ### Added
 
 - Boost: temporarily follow a different shaping function and parameter, for example to
@@ -11,6 +21,17 @@
 - Choose several areas for a setup, combine areas with labels (a light in a chosen area
   or with a chosen label, or only lights that have both), and exclude areas or labels.
   Setups with a single area keep working unchanged.
+
+### Fixed
+
+- Entity names no longer repeat the setup name. New entities were created with IDs such
+  as `switch.dining_room_dining_room_boost`; they are now created as
+  `switch.dining_room_boost`. Unique IDs are unchanged, so existing entities keep
+  their IDs, history, labels and customizations. Entities that already have a doubled
+  ID keep it until you rename them: open the setup's device page, choose the three-dot
+  menu, and select **Recreate entity IDs**. Update any dashboards or automations that
+  use the old IDs afterwards.
+- Entity names use sentence case, for example "Boost duration".
 
 ## 0.1.1
 

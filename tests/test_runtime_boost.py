@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class BoostSettingsTests(unittest.TestCase):
@@ -62,7 +62,7 @@ class BoostLightTargetTests(unittest.IsolatedAsyncioTestCase):
         }
         self.states = {'light.a': SimpleNamespace(state='on', attributes={})}
         self.hass = SimpleNamespace(
-            data={'periodic_lights': {'entry': self.data}},
+            config_entries=FakeConfigEntries({'entry': self.data}),
             states=SimpleNamespace(get=self.states.get),
             services=SimpleNamespace(async_call=AsyncMock()),
         )
@@ -114,7 +114,7 @@ class BoostLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.update = self.boost.async_update_lights_for_entry = AsyncMock()
         self.data = {'boost_duration': 30}
         self.hass = SimpleNamespace(
-            data={'periodic_lights': {'entry': self.data}},
+            config_entries=FakeConfigEntries({'entry': self.data}),
             async_create_task=lambda coro: self.tasks.append(asyncio.ensure_future(coro)),
         )
 
@@ -182,7 +182,7 @@ class BoostSwitchRestoreTests(unittest.IsolatedAsyncioTestCase):
         self.switch_module.async_start_boost = (
             lambda hass, entry_id, **kwargs: self.calls.append(kwargs)
         )
-        self.hass = SimpleNamespace(data={'periodic_lights': {'entry': {}}})
+        self.hass = SimpleNamespace(config_entries=FakeConfigEntries({'entry': {}}))
 
     async def restore(self, last_state):
         switch = self.switch_module.PeriodicLightsBoostSwitch(self.hass, 'entry', 'Test')

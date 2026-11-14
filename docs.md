@@ -60,6 +60,12 @@ examples use a `lamps` label on every lamp in the house.
 
 When setup completes, you get multiple controls grouped under one device:
 
+Entities are named after their function, and Home Assistant adds the setup name in
+front, for example `switch.dining_room_boost`. Versions before 0.2.0 could create IDs
+with the setup name repeated. Existing IDs are never changed automatically; to
+rename them, open the setup's device page, choose the three-dot menu, and select
+**Recreate entity IDs**, then update dashboards and automations that use the old IDs.
+
 #### Switches
 
 | Entity | Function |
@@ -259,10 +265,20 @@ Run the runtime unit tests:
 python -m unittest discover -s tests -p "test_runtime*.py"
 ```
 
-These tests mock the Home Assistant boundary. Use a live Home Assistant installation
-to verify behavior before deployment.
+These tests mock the Home Assistant boundary, so they are fast and need only Pillow.
 
-The `Validate` GitHub workflow runs hassfest, HACS validation, these tests, and the
+A second suite in `tests/live/` runs inside a real Home Assistant instance. It covers
+the config and options flows in full, setup, entity IDs, reload, and unload:
+
+```bash
+pip install pytest-homeassistant-custom-component
+pytest
+```
+
+Install it in a virtual environment; it pulls in a full Home Assistant release.
+Neither suite replaces a check on your own installation before deployment.
+
+The `Validate` GitHub workflow runs hassfest, HACS validation, both test suites, and the
 ruff error checks on every push and pull request to `main`, and weekly so that a new
 Home Assistant release that breaks the manifest shows up without a code change.
 

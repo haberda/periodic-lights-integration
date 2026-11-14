@@ -27,7 +27,7 @@ SIGNAL_UPDATE_SENSORS = "periodic_lights_update_sensors"
 # Dispatcher signal used to refresh entities (switch attributes, etc.)
 SIGNAL_REFRESH_ENTITIES = "periodic_lights_refresh_entities"
 
-# Runtime flags stored in hass.data for each entry
+# Runtime flags stored in each entry's runtime_data
 ATTR_ENABLED = "enabled"
 ATTR_BRIGHTNESS_ENABLED = "brightness_enabled"
 ATTR_COLOR_TEMP_ENABLED = "color_temp_enabled"

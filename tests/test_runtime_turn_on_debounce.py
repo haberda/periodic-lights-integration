@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 LIGHTS = ['light.a', 'light.b', 'light.c']
 
@@ -37,13 +37,14 @@ class TurnOnDebounceTests(unittest.IsolatedAsyncioTestCase):
             add_update_listener=lambda fn: lambda: None,
         )
         self.hass = SimpleNamespace(
-            data={}, is_running=True,
+            is_running=True,
             states=SimpleNamespace(get=lambda eid: None),
-            config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock()),
+            config_entries=FakeConfigEntries(async_forward_entry_setups=AsyncMock()),
             async_create_task=lambda coro: self.tasks.append(asyncio.ensure_future(coro)),
         )
+        self.hass.config_entries.add(self.entry)
         await integration.async_setup_entry(self.hass, self.entry)
-        self.data = self.hass.data['periodic_lights']['entry']
+        self.data = self.hass.config_entries.async_get_entry('entry').runtime_data
 
     def turn_on(self, entity_id):
         old = SimpleNamespace(state='off', attributes={})

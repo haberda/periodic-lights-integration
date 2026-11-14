@@ -3,19 +3,19 @@ from __future__ import annotations
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     DOMAIN,
-    MANUFACTURER,
     CONF_NAME,
     ATTR_SHAPING_FUNCTION,
     ATTR_BOOST_SHAPING_FUNCTION,
     DEFAULT_BOOST_SHAPING_FUNCTION,
     DEFAULT_SHAPING_FUNCTION,
 )
+from .runtime import get_entry_data
+from .entity import PeriodicLightsEntity
 from .light_control import async_update_lights_for_entry
 
 # internal id -> label
@@ -40,7 +40,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up select entities for a config entry."""
     async_add_entities([
-        TemperatureCurveSelect(hass, entry.entry_id, entry.title, 'temperature_shaping_function', 'Temperature Shaping Function'),
+        TemperatureCurveSelect(hass, entry.entry_id, entry.title, 'temperature_shaping_function', 'Temperature shaping function'),
     ])
     setup_name = entry.data.get(CONF_NAME, entry.title)
     async_add_entities([
@@ -49,13 +49,13 @@ async def async_setup_entry(
             hass, entry.entry_id, setup_name,
             key=ATTR_BOOST_SHAPING_FUNCTION,
             default=DEFAULT_BOOST_SHAPING_FUNCTION,
-            name_suffix="Boost Shaping Function",
+            name_suffix="Boost shaping function",
             unique_suffix="boost_shaping_function",
         ),
     ])
 
 
-class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
+class PeriodicLightsShapingFunctionSelect(PeriodicLightsEntity, RestoreEntity, SelectEntity):
     """Select for choosing the curve shaping function."""
 
     _attr_has_entity_name = True
@@ -68,7 +68,7 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
         *,
         key: str = ATTR_SHAPING_FUNCTION,
         default: str = DEFAULT_SHAPING_FUNCTION,
-        name_suffix: str = "Shaping Function",
+        name_suffix: str = "Shaping function",
         unique_suffix: str = "shaping_function",
     ) -> None:
         self.hass = hass
@@ -76,26 +76,17 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
         self._setup_name = setup_name
         self._key = key
 
-        self._attr_name = f"{setup_name} {name_suffix}"
+        self._attr_name = name_suffix
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{unique_suffix}"
         self._attr_options = list(ID_TO_LABEL.values())
 
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         current_id = data.get(key, default)
         self._attr_current_option = ID_TO_LABEL.get(current_id, ID_TO_LABEL[default])
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Group entity under the setup's device."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     async def async_added_to_hass(self) -> None:
-        """Restore last selected shaping function and push it into hass.data."""
+        """Restore last selected shaping function and push it into runtime data."""
         await super().async_added_to_hass()
 
         last_state = await self.async_get_last_state()
@@ -108,7 +99,7 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
 
         func_id = LABEL_TO_ID[option]
 
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[self._key] = func_id
 
@@ -122,7 +113,7 @@ class PeriodicLightsShapingFunctionSelect(RestoreEntity, SelectEntity):
 
         func_id = LABEL_TO_ID[option]
 
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[self._key] = func_id
 

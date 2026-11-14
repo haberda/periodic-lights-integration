@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
@@ -16,7 +16,7 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
             },
         }
         self.hass = SimpleNamespace(
-            data={"periodic_lights": {"entry": self.data}},
+            config_entries=FakeConfigEntries({"entry": self.data}),
             states=SimpleNamespace(get=lambda eid: self.light),
             services=SimpleNamespace(async_call=AsyncMock()),
         )

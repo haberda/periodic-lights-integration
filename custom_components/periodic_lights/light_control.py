@@ -45,6 +45,7 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
     SIGNAL_REFRESH_ENTITIES,
 )
+from .runtime import all_entry_data, get_entry_data
 from .boost import effective_settings
 from .curve_math import apply_shaping, map_pct_to_range
 from .solar_curve import daily_pct
@@ -161,7 +162,7 @@ def _record_expected_change(
 
 def layered_group_owner(hass: HomeAssistant, data: dict[str, Any], light_id: str) -> str | None:
     """A selected virtual group owns its members, including across PL entries."""
-    entries = [data, *hass.data.get(DOMAIN, {}).values()]
+    entries = [data, *all_entry_data(hass)]
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -225,7 +226,7 @@ async def async_update_lights_for_entry(
     hass: HomeAssistant, entry_id: str, *, force: bool = False,
 ) -> None:
     """Track in-flight updates so disabling or unloading can cancel them."""
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    entry_data = get_entry_data(hass, entry_id)
     if entry_data is None:
         return
     tasks = entry_data.setdefault(ATTR_UPDATE_TASKS, set())
@@ -252,13 +253,7 @@ async def _async_update_lights_for_entry(
     force: bool = False,
 ) -> None:
     """Apply current settings to all configured lights for this entry."""
-    domain_data = hass.data.get(DOMAIN)
-    if not domain_data:
-        if force:
-            async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
-        return
-
-    entry_data: dict[str, Any] | None = domain_data.get(entry_id)
+    entry_data: dict[str, Any] | None = get_entry_data(hass, entry_id)
     if not entry_data:
         if force:
             async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
@@ -319,7 +314,7 @@ async def _async_update_lights_for_entry(
 
     async def _call_light(service: str, entity_ids: list[str], data: dict[str, Any]) -> None:
         # State may change while a split update waits for its first transition.
-        current = hass.data.get(DOMAIN, {}).get(entry_id)
+        current = get_entry_data(hass, entry_id)
         if current is not entry_data or not current.get(ATTR_ENABLED, True):
             return
         if "color_temp_kelvin" in data and not current.get(ATTR_COLOR_TEMP_ENABLED, True):
@@ -367,7 +362,7 @@ async def _async_update_lights_for_entry(
         for lid in eligible:
             # Off/on, disable, or override clearing during the call invalidates this session.
             if (service == "turn_on"
-                and hass.data.get(DOMAIN, {}).get(entry_id) is entry_data
+                and get_entry_data(hass, entry_id) is entry_data
                 and entry_data.get(ATTR_EXPECTED_CHANGES, {}).get(lid) is expected[lid]
                 and light_adaptation_status(hass, entry_data, lid) == "adapting"):
                 last = entry_data.setdefault(ATTR_LAST_APPLIED, {}).setdefault(lid, {})

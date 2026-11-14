@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 def entity(entity_id, *, labels=(), device_id=None, hidden_by=None, area_id=None):
@@ -116,17 +116,18 @@ class LabelRegistryRefreshTests(unittest.IsolatedAsyncioTestCase):
             async_on_unload=lambda fn: None, add_update_listener=lambda fn: lambda: None,
         )
         self.hass = SimpleNamespace(
-            data={}, is_running=True,
+            is_running=True,
             states=SimpleNamespace(get=lambda eid: None),
-            config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock()),
+            config_entries=FakeConfigEntries(async_forward_entry_setups=AsyncMock()),
             bus=SimpleNamespace(
                 async_listen=lambda event, fn: self.bus_listeners.setdefault(event, fn) and (lambda: None),
                 async_listen_once=lambda event, fn: lambda: None,
             ),
             async_create_task=lambda coro: self.tasks.append(asyncio.ensure_future(coro)),
         )
+        self.hass.config_entries.add(entry)
         await integration.async_setup_entry(self.hass, entry)
-        self.data = self.hass.data['periodic_lights']['entry']
+        self.data = self.hass.config_entries.async_get_entry('entry').runtime_data
 
     def registry_timers(self):
         return [t for t in self.timers if t.delay == self.integration.REGISTRY_REFRESH_DELAY]
