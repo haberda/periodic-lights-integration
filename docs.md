@@ -61,7 +61,7 @@ examples use a `lamps` label on every lamp in the house.
 When setup completes, you get multiple controls grouped under one device:
 
 Entities are named after their function, and Home Assistant adds the setup name in
-front, for example `switch.dining_room_boost`. Versions before 0.2.0 could create IDs
+front, for example `switch.dining_room_boost`. Versions before 0.5.1 could create IDs
 with the setup name repeated. Existing IDs are never changed automatically; to
 rename them, open the setup's device page, choose the three-dot menu, and select
 **Recreate entity IDs**, then update dashboards and automations that use the old IDs.
@@ -286,12 +286,26 @@ A second suite in `tests/live/` runs inside a real Home Assistant instance. It c
 the config and options flows in full, setup, entity IDs, reload, and unload:
 
 ```bash
-pip install pytest-homeassistant-custom-component
+pip install "pytest-homeassistant-custom-component==0.13.375"
 pytest
 ```
 
 Install it in a virtual environment; it pulls in a full Home Assistant release.
 Neither suite replaces a check on your own installation before deployment.
+
+Each release of that package pins exactly one Home Assistant release. CI runs the
+suite twice, with pinned versions set in `.github/workflows/validate.yml`:
+
+| Package version | Home Assistant | Why |
+|---|---|---|
+| 0.13.354 | 2026.8.0 | The oldest release `hacs.json` allows. |
+| 0.13.375 | 2026.10.4 | The newest release the package supports. |
+
+To move to a newer Home Assistant, find the package release that pins it (each
+release's requirements on PyPI name the version), update the second row here and
+in the workflow, and run `pytest` locally. If you raise the minimum version in
+`hacs.json`, update the first row to match. Releases newer than the second row are
+not covered by CI until the package publishes a matching version.
 
 The `Validate` GitHub workflow runs hassfest, HACS validation, both test suites, and the
 ruff error checks on every push and pull request to `main`, and weekly so that a new

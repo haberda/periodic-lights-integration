@@ -38,12 +38,24 @@ jobs:
 
   homeassistant-tests:
     runs-on: ubuntu-latest
+    name: Home Assistant ${{ matrix.homeassistant }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each harness release pins one Home Assistant release. Test the oldest
+        # release hacs.json allows and the newest the harness supports.
+        # See "Development" in docs.md before changing these.
+        include:
+          - homeassistant: "2026.8.0"
+            harness: "0.13.354"
+          - homeassistant: "2026.10.4"
+            harness: "0.13.375"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
       - name: Install Home Assistant test harness
-        run: pip install pytest-homeassistant-custom-component
+        run: pip install "pytest-homeassistant-custom-component==${{ matrix.harness }}"
       - name: Tests inside Home Assistant
         run: pytest --cov=custom_components.periodic_lights --cov-report=term-missing
