@@ -1,7 +1,7 @@
 """Controller contract for Layered Lights virtual room entities."""
 import unittest
 from types import SimpleNamespace
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class LayeredLightsTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class LayeredLightsTests(unittest.TestCase):
         self.member = SimpleNamespace(state='on', attributes={})
         self.states = {'light.room': self.group, 'light.lamp': self.member}
         self.data = {'lights': ['light.room', 'light.lamp']}
-        self.hass = SimpleNamespace(data={'periodic_lights': {'room': self.data}}, states=SimpleNamespace(get=self.states.get))
+        self.hass = SimpleNamespace(config_entries=FakeConfigEntries({'room': self.data}), states=SimpleNamespace(get=self.states.get))
 
     def test_member_is_owned_by_selected_group(self):
         self.assertEqual(self.control.light_adaptation_status(self.hass, self.data, 'light.lamp'), 'controlled_by_group')

@@ -2,7 +2,7 @@
 import unittest
 from types import SimpleNamespace
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 SETUP_NAME = 'Dining Room'
 PLATFORMS = ('switch', 'number', 'select', 'sensor', 'time', 'button', 'image')
@@ -54,12 +54,12 @@ class EntityNameTests(unittest.IsolatedAsyncioTestCase):
         # comes from the integration repeating it.
         states = {'light.table_lamp': SimpleNamespace(state='on', name='Table Lamp', attributes={})}
         hass = SimpleNamespace(
-            data={'periodic_lights': {'entry': data}},
+            config_entries=FakeConfigEntries({'entry': data}),
             states=SimpleNamespace(get=states.get),
         )
         entry = SimpleNamespace(
             entry_id='entry', title=SETUP_NAME, data={'name': SETUP_NAME, 'lights': ['light.table_lamp']},
-            options={}, async_on_unload=lambda fn: None,
+            options={}, async_on_unload=lambda fn: None, runtime_data=data,
         )
         self.entities = []
         for platform in PLATFORMS:

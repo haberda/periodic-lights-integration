@@ -65,6 +65,7 @@ from .const import (
     DEFAULT_BOOST_SHAPING_PARAM,
     DEFAULT_BOOST_DURATION,
 )
+from .runtime import get_entry_data
 from .boost_control import cancel_boost_timer
 from .light_selection import (
     SelectionRules,
@@ -218,8 +219,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pformat(dict(entry.options)),
     )
 
-    hass.data.setdefault(DOMAIN, {})
-
     setup_name = entry.data.get("name", entry.title)
 
     def _notify_entry_state_changed() -> None:
@@ -265,12 +264,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ATTR_LIGHT_ON_LISTENER: None,
     }
 
-    hass.data[DOMAIN][entry.entry_id] = entry_state
+    entry.runtime_data = entry_state
 
     # ---- Enable override detection after HA startup + grace ----
     @callback
     def _enable_override_detection(_now=None) -> None:
-        st = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        st = get_entry_data(hass, entry.entry_id)
         if not st:
             return
         st[ATTR_OVERRIDE_DETECTION_READY] = True
@@ -397,7 +396,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not entity_id:
             return
 
-        state = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        state = (get_entry_data(hass, entry.entry_id) or {})
         lights: list[str] = state.get(CONF_LIGHTS, []) or []
         if entity_id not in lights:
             return
@@ -498,7 +497,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # ---- Post-start refresh: area may be incomplete during early startup ----
     def _apply_effective_lights(new_lights: list[str]) -> None:
-        st = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        st = get_entry_data(hass, entry.entry_id)
         if not st:
             return
 
@@ -596,7 +595,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    entry_state = hass.data[DOMAIN].get(entry.entry_id)
+    entry_state = get_entry_data(hass, entry.entry_id)
     if entry_state:
         cancel_pending_light_updates(entry_state)
         cancel_boost_timer(entry_state)
@@ -607,9 +606,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             unsub()
             entry_state[ATTR_LIGHT_ON_LISTENER] = None
         
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        if not hass.data[DOMAIN]:
-            hass.data.pop(DOMAIN, None)
-    return unload_ok
+    # Home Assistant clears entry.runtime_data once the unload succeeds.
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

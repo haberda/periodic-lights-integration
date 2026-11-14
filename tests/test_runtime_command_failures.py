@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class CommandFailureTests(unittest.IsolatedAsyncioTestCase):
@@ -29,7 +29,7 @@ class CommandFailureTests(unittest.IsolatedAsyncioTestCase):
                 raise self.dead_error
 
         self.hass = SimpleNamespace(
-            data={'periodic_lights': {'entry': self.data}},
+            config_entries=FakeConfigEntries({'entry': self.data}),
             states=SimpleNamespace(get=lambda eid: SimpleNamespace(state='on', attributes={})),
             services=SimpleNamespace(async_call=AsyncMock(side_effect=call)),
         )

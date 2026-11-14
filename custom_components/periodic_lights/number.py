@@ -5,7 +5,6 @@ from typing import Any
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -14,7 +13,6 @@ from .const import (
     ATTR_BOOST_SHAPING_PARAM,
     ATTR_RESCHEDULE_LIGHT_UPDATES,
     DOMAIN,
-    MANUFACTURER,
     CONF_NAME,
     CONF_LIGHTS,
     CONF_MIN_BRIGHTNESS,
@@ -26,6 +24,8 @@ from .const import (
     ATTR_LIGHT_SETTINGS,
     ATTR_SHAPING_PARAM,
 )
+from .runtime import get_entry_data
+from .entity import PeriodicLightsEntity
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .const import SIGNAL_REFRESH_ENTITIES
 
@@ -44,7 +44,7 @@ async def async_setup_entry(
     async_add_entities([
         TemperatureCurveNumber(hass, entry.entry_id, entry.title, 'temperature_shaping_param', 'Temperature shaping parameter'),
     ])
-    all_data = hass.data[DOMAIN][entry.entry_id]
+    all_data = entry.runtime_data
     setup_name = entry.data.get(CONF_NAME, entry.title)
     lights: list[str] = all_data.get(CONF_LIGHTS, [])
 
@@ -82,7 +82,7 @@ async def async_setup_entry(
 # ---------- Base classes ----------
 
 
-class _BasePeriodicNumber(RestoreEntity, NumberEntity):
+class _BasePeriodicNumber(PeriodicLightsEntity, RestoreEntity, NumberEntity):
     """Base class for Periodic Lights global number inputs."""
 
     # The device carries the setup name; entity names must not repeat it.
@@ -106,23 +106,14 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         self._attr_name = name_suffix
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{unique_suffix}"
 
-        # Initial value from hass.data (seeded in __init__.py)
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        # Initial value from runtime data (seeded in __init__.py)
+        entry_data = self.entry_data
         initial = entry_data.get(self._key)
         self._attr_native_value = float(initial) if initial is not None else None
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Group all entities for this setup under one device."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     async def async_added_to_hass(self) -> None:
-        """Restore last value and push it back into hass.data."""
+        """Restore last value and push it back into runtime data."""
         await super().async_added_to_hass()
 
         last_state = await self.async_get_last_state()
@@ -134,7 +125,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         except (TypeError, ValueError):
             return
 
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[self._key] = value
             if self._key == CONF_UPDATE_INTERVAL:
@@ -148,7 +139,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the input and stored config."""
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[self._key] = value
             if self._key == CONF_UPDATE_INTERVAL:
@@ -161,7 +152,7 @@ class _BasePeriodicNumber(RestoreEntity, NumberEntity):
         async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
 
-class _BasePerLightNumber(RestoreEntity, NumberEntity):
+class _BasePerLightNumber(PeriodicLightsEntity, RestoreEntity, NumberEntity):
     """Base class for per-light number inputs."""
 
     # Named from the light alone; the device carries the setup name.
@@ -198,7 +189,7 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
         safe_light_id = light_id.replace(".", "_")
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{safe_light_id}_{unique_suffix}"
 
-        root = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        root = self.entry_data
         lights_data = root.setdefault(ATTR_LIGHT_SETTINGS, {})
         light_data = lights_data.setdefault(self._light_id, {})
 
@@ -209,15 +200,6 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
 
         self._attr_native_value = float(initial) if initial is not None else None
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Group all entities for this setup under one device."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -227,7 +209,7 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
         }
 
     async def async_added_to_hass(self) -> None:
-        """Restore last per-light value and push it back into hass.data."""
+        """Restore last per-light value and push it back into runtime data."""
         await super().async_added_to_hass()
 
         last_state = await self.async_get_last_state()
@@ -239,7 +221,7 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
         except (TypeError, ValueError):
             return
 
-        root = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        root = get_entry_data(self.hass, self._entry_id)
         if root is not None:
             lights_data = root.setdefault(ATTR_LIGHT_SETTINGS, {})
             light_data = lights_data.setdefault(self._light_id, {})
@@ -250,8 +232,8 @@ class _BasePerLightNumber(RestoreEntity, NumberEntity):
         async_dispatcher_send(self.hass, f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}")
 
     async def async_set_native_value(self, value: float) -> None:
-        """Update the per-light override in hass.data."""
-        root = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        """Update the per-light override in runtime data."""
+        root = get_entry_data(self.hass, self._entry_id)
         if root is not None:
             lights_data = root.setdefault(ATTR_LIGHT_SETTINGS, {})
             light_data = lights_data.setdefault(self._light_id, {})

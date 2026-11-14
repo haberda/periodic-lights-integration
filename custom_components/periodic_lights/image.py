@@ -8,14 +8,15 @@ from datetime import timedelta
 from homeassistant.components.image import ImageEntity
 from homeassistant.core import callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MANUFACTURER, SIGNAL_REFRESH_ENTITIES, SIGNAL_UPDATE_SENSORS
+from .const import DOMAIN, SIGNAL_REFRESH_ENTITIES, SIGNAL_UPDATE_SENSORS
+from .runtime import get_entry_data
+from .entity import PeriodicLightsEntity
 from .preview import render_preview
 from .boost import effective_settings
 from .solar_curve import daily_pct
@@ -25,7 +26,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([PeriodicLightsCurveImage(hass, entry.entry_id, entry.title)])
 
 
-class PeriodicLightsCurveImage(ImageEntity):
+class PeriodicLightsCurveImage(PeriodicLightsEntity, ImageEntity):
     _attr_has_entity_name = True
     _attr_name = "Daily curve preview"
     _attr_content_type = "image/png"
@@ -42,14 +43,6 @@ class PeriodicLightsCurveImage(ImageEntity):
         self._rendered_revision = -1
         self._lock = asyncio.Lock()
 
-    @property
-    def device_info(self):
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     @callback
     def _invalidate(self, *_):
@@ -77,7 +70,7 @@ class PeriodicLightsCurveImage(ImageEntity):
         async with self._lock:
             revision = self._revision
             if self._png is None or self._rendered_revision != revision:
-                data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+                data = get_entry_data(self.hass, self._entry_id)
                 if data is None:
                     return None
                 # Copy scalar settings before leaving the event loop.

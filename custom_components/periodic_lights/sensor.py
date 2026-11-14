@@ -7,7 +7,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval, async_track_state_change_event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -23,7 +23,6 @@ from .const import (
     CONF_MAX_BRIGHTNESS,
     CONF_MIN_KELVIN,
     CONF_MAX_KELVIN,
-    MANUFACTURER,
     ATTR_ENABLED,
     ATTR_BRIGHTNESS_ENABLED,
     ATTR_COLOR_TEMP_ENABLED,
@@ -37,6 +36,8 @@ from .const import (
     DEFAULT_SHAPING_FUNCTION,
     SIGNAL_UPDATE_SENSORS,
 )
+from .runtime import get_entry_data
+from .entity import PeriodicLightsEntity
 from .boost import effective_settings
 from .curve_math import apply_shaping, map_pct_to_range
 from .solar_curve import SolarCycle, daily_pct
@@ -75,7 +76,7 @@ async def async_setup_entry(
 
     @callback
     def add_light_diagnostics() -> None:
-        lights = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get(CONF_LIGHTS, [])
+        lights = (get_entry_data(hass, entry.entry_id) or {}).get(CONF_LIGHTS, [])
         new_lights = set(lights) - known
         if new_lights:
             known.update(new_lights)
@@ -96,7 +97,7 @@ def _compute_phase_with_optional_override(hass, entry_data):
     return (point.phase, cycle)
 
 
-class _BasePeriodicSensor(SensorEntity):
+class _BasePeriodicSensor(PeriodicLightsEntity, SensorEntity):
     """Base class for Periodic Lights sensors providing device grouping & timer."""
 
     _attr_has_entity_name = True
@@ -113,15 +114,6 @@ class _BasePeriodicSensor(SensorEntity):
         self._unsub_timer = None
         self._unsub_dispatcher = None
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Group all entities for this setup under one device."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     async def async_added_to_hass(self) -> None:
         """Start periodic updates and subscribe to external triggers."""
@@ -183,7 +175,7 @@ class _BasePeriodicSensor(SensorEntity):
             # Fallback: leave previous value
 
     def _updates_enabled(self) -> bool:
-        """Check global + specific flags in hass.data.
+        """Check global + specific flags in runtime data.
 
         Implemented in subclasses.
         """
@@ -227,13 +219,13 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
         self._attr_native_value: float | None = None
 
     def _updates_enabled(self) -> bool:
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         master = data.get(ATTR_ENABLED, True)
         brightness_enabled = data.get(ATTR_BRIGHTNESS_ENABLED, True)
         return master and brightness_enabled
 
     def _recalculate(self) -> None:
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        entry_data = self.entry_data
 
         # Baseline daily phase (0 = night, 0.5 = midday, 1 = next night)
         phase, cycle = _compute_phase_with_optional_override(self.hass, entry_data)
@@ -272,7 +264,7 @@ class PeriodicLightsBrightnessSensor(_BasePeriodicSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs = super().extra_state_attributes
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         attrs["min_brightness"] = data.get(
             CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS
         )
@@ -300,14 +292,14 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
         self._attr_native_value: float | None = None
 
     def _updates_enabled(self) -> bool:
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         master = data.get(ATTR_ENABLED, True)
         ct_enabled = data.get(ATTR_COLOR_TEMP_ENABLED, True)
         return master and ct_enabled
 
     def _recalculate(self) -> None:
         entry_data = temperature_curve_settings(
-            effective_settings(self.hass.data.get(DOMAIN, {}).get(self._entry_id, {}))
+            effective_settings(self.entry_data)
         )
 
         # Baseline daily phase
@@ -340,13 +332,13 @@ class PeriodicLightsColorTempSensor(_BasePeriodicSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         attrs = super().extra_state_attributes
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         attrs["min_kelvin"] = data.get(CONF_MIN_KELVIN, DEFAULT_MIN_KELVIN)
         attrs["max_kelvin"] = data.get(CONF_MAX_KELVIN, DEFAULT_MAX_KELVIN)
         return attrs
 
 
-class PeriodicLightsAdaptationSensor(SensorEntity):
+class PeriodicLightsAdaptationSensor(PeriodicLightsEntity, SensorEntity):
     """Explain why a configured light is or is not being updated."""
 
     _attr_has_entity_name = True
@@ -366,24 +358,20 @@ class PeriodicLightsAdaptationSensor(SensorEntity):
         self._attr_name = f"{state.name if state else light_id} adaptation"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_{light_id}_adaptation"
 
-    @property
-    def device_info(self):
-        return DeviceInfo(identifiers={(DOMAIN, self._entry_id)}, name=self._setup_name,
-                          manufacturer=MANUFACTURER, model="Light Setup")
 
     @property
     def available(self):
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         return self._light_id in data.get(CONF_LIGHTS, [])
 
     @property
     def native_value(self):
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         return light_adaptation_status(self.hass, data, self._light_id)
 
     @property
     def extra_state_attributes(self):
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        data = self.entry_data
         phase, _ = _compute_phase_with_optional_override(self.hass, data)
         curve_settings = effective_settings(data)
         shaped = apply_shaping(phase, curve_settings.get(ATTR_SHAPING_FUNCTION, DEFAULT_SHAPING_FUNCTION),
