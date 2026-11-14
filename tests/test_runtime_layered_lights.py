@@ -28,6 +28,16 @@ class LayeredLightsTests(unittest.TestCase):
         other = {'lights': ['light.lamp']}
         self.assertEqual(self.control.light_adaptation_status(self.hass, other, 'light.lamp'), 'controlled_by_group')
 
+    def test_entries_of_other_integrations_are_ignored(self):
+        """Only Periodic Lights entries can own a light, as with real config entries."""
+        other = {'lights': ['light.lamp']}
+        foreign = SimpleNamespace(
+            entry_id='foreign', domain='other', runtime_data={'lights': ['light.room']},
+        )
+        hass = SimpleNamespace(states=self.hass.states, config_entries=FakeConfigEntries())
+        hass.config_entries.add(foreign)
+        self.assertEqual(self.control.light_adaptation_status(hass, other, 'light.lamp'), 'adapting')
+
     def test_group_membership_change_releases_removed_member(self):
         self.group.attributes['layered_lights_members'] = []
         self.assertEqual(self.control.light_adaptation_status(self.hass, self.data, 'light.lamp'), 'adapting')

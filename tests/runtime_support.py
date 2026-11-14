@@ -16,12 +16,16 @@ class FakeConfigEntries:
         self.__dict__.update(attrs)
 
     def add(self, entry):
+        if not hasattr(entry, 'domain'):
+            entry.domain = 'periodic_lights'
         self._entries[entry.entry_id] = entry
         return entry
 
     def set_runtime(self, entry_id, data):
         """Assign runtime_data, as a (re)load of the entry would."""
-        entry = self._entries.setdefault(entry_id, SimpleNamespace(entry_id=entry_id))
+        entry = self._entries.setdefault(
+            entry_id, SimpleNamespace(entry_id=entry_id, domain='periodic_lights')
+        )
         entry.runtime_data = data
 
     def unload(self, entry_id):
@@ -34,7 +38,11 @@ class FakeConfigEntries:
         return self._entries.get(entry_id)
 
     def async_entries(self, domain=None):
-        return list(self._entries.values())
+        """Return entries for one domain, as Home Assistant does."""
+        return [
+            entry for entry in self._entries.values()
+            if domain is None or entry.domain == domain
+        ]
 
 
 ROOT = Path(__file__).resolve().parents[1] / 'custom_components' / 'periodic_lights'
