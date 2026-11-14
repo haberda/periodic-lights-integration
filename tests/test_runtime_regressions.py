@@ -82,7 +82,7 @@ class OverrideTests(unittest.IsolatedAsyncioTestCase):
             add_update_listener=lambda fn: lambda: None,
         )
         self.hass = SimpleNamespace(
-            is_running=True,
+            state='running',
             states=SimpleNamespace(get=lambda eid: self.state(50)),
             config_entries=FakeConfigEntries(async_forward_entry_setups=AsyncMock()),
         )

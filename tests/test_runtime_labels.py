@@ -116,7 +116,7 @@ class LabelRegistryRefreshTests(unittest.IsolatedAsyncioTestCase):
             async_on_unload=lambda fn: None, add_update_listener=lambda fn: lambda: None,
         )
         self.hass = SimpleNamespace(
-            is_running=True,
+            state='running',
             states=SimpleNamespace(get=lambda eid: None),
             config_entries=FakeConfigEntries(async_forward_entry_setups=AsyncMock()),
             bus=SimpleNamespace(

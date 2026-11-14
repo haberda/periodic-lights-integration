@@ -8,11 +8,11 @@ from typing import Any
 
 from homeassistant.components import logbook
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
 
 from .const import (
@@ -275,19 +275,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         st[ATTR_OVERRIDE_DETECTION_READY] = True
         _LOGGER.debug("PL OVERRIDE DETECTION READY | entry_id=%s", entry.entry_id)
 
-    def _schedule_override_detection_enable() -> None:
+    @callback
+    def _on_started_for_override(_hass: HomeAssistant) -> None:
         entry.async_on_unload(async_call_later(hass, 15, _enable_override_detection))
 
-    if hass.is_running:
-        _schedule_override_detection_enable()
-    else:
-        @callback
-        def _on_started_for_override(_event) -> None:
-            _schedule_override_detection_enable()
-
-        entry.async_on_unload(
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started_for_override)
-        )
+    # async_at_started runs the callback now if Home Assistant has started, and
+    # its unsubscribe is safe to call after the one-time listener has fired.
+    entry.async_on_unload(async_at_started(hass, _on_started_for_override))
 
     # ---- Reload entry when options change ----
     async def _update_listener(_hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
@@ -533,16 +527,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Periodic Lights POSTSTART REFRESH failed | entry_id=%s", entry.entry_id)
 
-    if hass.is_running:
-        entry.async_on_unload(async_call_later(hass, 5, _do_poststart_refresh))
-        entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
-    else:
-        @callback
-        def _on_started(_event) -> None:
-            hass.async_create_task(_do_poststart_refresh())
-            entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
+    loaded_during_startup = hass.state is not CoreState.running
 
-        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
+    @callback
+    def _on_started(_hass: HomeAssistant) -> None:
+        if loaded_during_startup:
+            hass.async_create_task(_do_poststart_refresh())
+        else:
+            entry.async_on_unload(async_call_later(hass, 5, _do_poststart_refresh))
+        entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
+
+    entry.async_on_unload(async_at_started(hass, _on_started))
 
     # ---- Keep area and label membership current when registries change ----
     if selection_rules.selects_anything:

@@ -77,7 +77,20 @@ def load_runtime():
     module('homeassistant.helpers.entity', Entity=Entity, DeviceInfo=dict, EntityCategory=SimpleNamespace(DIAGNOSTIC='diagnostic'))
     module('homeassistant.helpers.entity_platform', AddEntitiesCallback=object)
     module('homeassistant.helpers.restore_state', RestoreEntity=RestoreEntity)
-    module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object, callback=lambda fn: fn)
+    core_state = SimpleNamespace(running='running', starting='starting')
+    module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object,
+           callback=lambda fn: fn, CoreState=core_state)
+
+    def async_at_started(hass, at_start_cb):
+        """Run now when started; otherwise park the callback for the test to fire."""
+        if getattr(hass, 'state', core_state.running) == core_state.running:
+            at_start_cb(hass)
+            return lambda: None
+        pending = hass.__dict__.setdefault('at_started', [])
+        pending.append(at_start_cb)
+        return lambda: pending.remove(at_start_cb) if at_start_cb in pending else None
+
+    module('homeassistant.helpers.start', async_at_started=async_at_started)
     class ConfigFlow:
         def __init_subclass__(cls, **kwargs):
             pass
