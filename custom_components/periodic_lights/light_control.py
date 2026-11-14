@@ -157,6 +157,8 @@ def _record_expected_change(
             "brightness_pct": brightness_pct if brightness_pct is not None else previous.get("brightness_pct"),
             "color_temp_kelvin": kelvin if kelvin is not None else previous.get("color_temp_kelvin"),
             "expects_color_change": False,
+            # True until the service call for this command returns.
+            "in_flight": True,
         }
 
 
@@ -358,6 +360,9 @@ async def _async_update_lights_for_entry(
                 entry_id, service, eligible, err,
             )
             return
+        finally:
+            for record in expected.values():
+                record["in_flight"] = False
         entry_data.get(ATTR_FAILED_LIGHTS, set()).difference_update(eligible)
         for lid in eligible:
             # Off/on, disable, or override clearing during the call invalidates this session.

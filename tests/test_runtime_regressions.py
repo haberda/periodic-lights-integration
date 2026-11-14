@@ -122,6 +122,28 @@ class OverrideTests(unittest.IsolatedAsyncioTestCase):
         self.change(self.state(50), self.state(60))
         self.assertIn('light.test', self.data['overridden_lights'])
 
+    async def test_report_while_command_is_in_flight_is_not_judged(self):
+        self.expected['in_flight'] = True
+        self.change(self.state(50), self.state(30))
+        self.assertFalse(self.data['overridden_lights'])
+
+    async def test_user_adjustment_while_command_is_in_flight_is_detected(self):
+        self.expected['in_flight'] = True
+        self.change(self.state(50), self.state(30, user='user'))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_in_flight_flag_is_cleared_when_the_command_returns(self):
+        self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
+        seen = []
+
+        async def call(domain, service, payload, **kwargs):
+            seen.append(self.data['pl_expected_changes']['light.test']['in_flight'])
+
+        self.hass.services = SimpleNamespace(async_call=call)
+        await self.runtime.control.async_update_lights_for_entry(self.hass, 'entry', force=True)
+        self.assertEqual(seen, [True])
+        self.assertIs(self.data['pl_expected_changes']['light.test']['in_flight'], False)
+
     async def test_repeated_updates_do_not_remove_override_listener(self):
         self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
         self.hass.services = SimpleNamespace(async_call=AsyncMock())

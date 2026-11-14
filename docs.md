@@ -75,7 +75,7 @@ rename them, open the setup's device page, choose the three-dot menu, and select
 | **Color Temperature Updates** | Toggles CT control. |
 | **Bedtime** | When on, forces all lights to minimum brightness & CT. |
 | **Boost** | Temporarily follows the boost shape. See [Boost](#boost). |
-| **Transition When Light Turns On** | If enabled, newly turned-on lights immediately transition to current curve values. |
+| **Transition When Light Turns On** | If enabled, newly turned-on lights immediately transition to current curve values. This applies even when the turn-on asked for a specific brightness or color temperature; see [Turning a light on at a chosen level](#turning-a-light-on-at-a-chosen-level). |
 | **Use Fixed Minimum Time** | If enabled, uses the time set in the Fixed Minimum Time entity to set a fixed minimum point. Using this feature disables solar based curve calculation so the light parameters will not vary with the season. |
 
 #### Number inputs
@@ -166,6 +166,21 @@ Shaping parameter 1.5:
 Shaping parameter 2:
 
 <img src='assets/images/curves_param_2.png' width=800>
+
+## Turning a light on at a chosen level
+
+With **Transition When Light Turns On** enabled, a light is moved to the curve as soon
+as it turns on. A turn-on that asks for a level, such as 20% from a dashboard or an
+automation, is treated the same way: the light comes on and is then adapted. It is not
+counted as a manual override.
+
+- To keep the level you asked for, turn **Transition When Light Turns On** off, or
+  adjust the light after it is on. An adjustment to a light that is already on is a
+  manual override, and the light keeps it until it is turned off or you use **Clear
+  overrides and update**.
+- Some lights report "on" first and their brightness in a second update. For those,
+  the requested level arrives as an adjustment to a light that is already on, so it is
+  kept and the light shows as manually overridden.
 
 ## Boost
 

@@ -159,6 +159,12 @@ def _matches_expected(
     if getattr(context, "user_id", None) is not None:
         return False
 
+    # A report that lands while our own command is still executing describes the
+    # light before that command took effect, for example the tail of the action
+    # that turned the light on. The command supersedes it, so it is not judged.
+    if expected.get("in_flight", False):
+        return True
+
     checks = (
         (brightness_enabled, "brightness_pct", "start_brightness_pct", _get_brightness_pct_from_state, 2),
         (color_temp_enabled, "color_temp_kelvin", "start_kelvin", _get_kelvin_from_state, 75),
