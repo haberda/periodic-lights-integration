@@ -13,6 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ATTR_TURN_ON_PENDING,
     ATTR_FAILED_LIGHTS,
     ATTR_OVERRIDDEN_LIGHTS,
     ATTR_EXPECTED_CHANGES,
@@ -150,6 +151,12 @@ def _record_expected_change(
         previous = expected_map.get(lid, {})
         if previous.get("until", 0) < now_ts:
             previous = {}
+        # The first command after a light turns on settles the turn-on. A split
+        # update's second step continues the same settling period.
+        pending = entry_data.get(ATTR_TURN_ON_PENDING)
+        settling = bool(previous.get("settling")) or bool(pending and lid in pending)
+        if pending:
+            pending.discard(lid)
         expected_map[lid] = {
             "start_brightness_pct": round(brightness / 255 * 100) if brightness is not None else None,
             "start_kelvin": round(kelvin_now) if kelvin_now is not None else None,
@@ -159,6 +166,10 @@ def _record_expected_change(
             "expects_color_change": False,
             # True until the service call for this command returns.
             "in_flight": True,
+            # True for the command that adapts a light as it turns on. Until
+            # "until", reports without a user context are not judged: they
+            # describe the turn-on itself, which this command replaces.
+            "settling": settling,
         }
 
 
@@ -346,6 +357,9 @@ async def _async_update_lights_for_entry(
             for lid in eligible:
                 if entry_data.get(ATTR_EXPECTED_CHANGES, {}).get(lid) is expected[lid]:
                     entry_data[ATTR_EXPECTED_CHANGES].pop(lid, None)
+                    if expected[lid].get("settling"):
+                        # The retry is still this light's turn-on command.
+                        entry_data.setdefault(ATTR_TURN_ON_PENDING, set()).add(lid)
                 entry_data.get(ATTR_LAST_APPLIED, {}).pop(lid, None)
             if not isinstance(err, (HomeAssistantError, vol.Invalid)):
                 raise

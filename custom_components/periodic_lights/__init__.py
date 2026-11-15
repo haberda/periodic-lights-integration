@@ -50,6 +50,7 @@ from .const import (
     SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
     ATTR_LIGHT_ON_LISTENER,
     ATTR_OVERRIDDEN_LIGHTS,
+    ATTR_TURN_ON_PENDING,
     ATTR_EXPECTED_CHANGES,
     ATTR_LAST_APPLIED,
     ATTR_CONTROLLED_LIGHTS,
@@ -162,7 +163,10 @@ def _matches_expected(
     # A report that lands while our own command is still executing describes the
     # light before that command took effect, for example the tail of the action
     # that turned the light on. The command supersedes it, so it is not judged.
-    if expected.get("in_flight", False):
+    # The same holds for the whole window of the command that adapts a light as
+    # it turns on: lights that hold back reports during a transition can report
+    # the turn-on's own level when the transition ends.
+    if expected.get("in_flight", False) or expected.get("settling", False):
         return True
 
     checks = (
@@ -313,6 +317,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         last = state.get(ATTR_LAST_APPLIED, {})
         last.pop(light_id, None)
 
+        state.get(ATTR_TURN_ON_PENDING, set()).discard(light_id)
+
         if before:
             _notify_entry_state_changed()
 
@@ -438,6 +444,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _mark_control_for_light_once(state, entity_id)
 
             if state.get(ATTR_TRANSITION_ON_TURN_ON, True):
+                state.setdefault(ATTR_TURN_ON_PENDING, set()).add(entity_id)
                 _schedule_turn_on_update(state)
 
             return
@@ -457,6 +464,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             brightness_enabled=brightness_enabled, color_temp_enabled=color_temp_enabled,
         ):
             return
+        context = getattr(new_state, "context", None)
+        _LOGGER.debug(
+            "PL OVERRIDE DETECTED | entry_id=%s light=%s brightness_pct=%s->%s kelvin=%s->%s "
+            "context_user=%s context_parent=%s expected=%s",
+            entry.entry_id, entity_id,
+            _get_brightness_pct_from_state(old_state), _get_brightness_pct_from_state(new_state),
+            _get_kelvin_from_state(old_state), _get_kelvin_from_state(new_state),
+            getattr(context, "user_id", None), getattr(context, "parent_id", None), expected or None,
+        )
         _mark_overridden(state, entity_id)
 
     # One listener remains active throughout updates and transitions.

@@ -46,6 +46,10 @@ brand images are in `custom_components/periodic_lights/brand/`.
   listeners, and pending updates when an entry unloads.
 - Respect manual overrides. Distinguish expected transition reports from external
   adjustments without disabling detection throughout repeated transitions.
+- A light is adapted as it turns on, even if the turn-on asked for a level. Reports
+  without a user context are not judged while our own service call is in flight, or
+  during the window of the one command that follows a turn-on. Do not widen that to
+  other commands; reports with a user context are always overrides.
 - Keep the brightness and temperature curves independent when separation is on;
   retain linked behavior by default. Preserve bedtime and per-light range handling.
 - Keep live targets, diagnostics, and previews consistent through shared calculation

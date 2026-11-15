@@ -1,7 +1,13 @@
 """A real light entity for tests, with selectable reporting behavior."""
 import asyncio
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_COLOR_TEMP_KELVIN, ColorMode, LightEntity
+from homeassistant.components.light import (
+    ATTR_BRIGHTNESS,
+    ATTR_COLOR_TEMP_KELVIN,
+    ColorMode,
+    LightEntity,
+    LightEntityFeature,
+)
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import setup_test_component_platform
 
@@ -20,6 +26,7 @@ class FakeLight(LightEntity):
     _attr_should_poll = False
     _attr_supported_color_modes = {ColorMode.COLOR_TEMP}
     _attr_color_mode = ColorMode.COLOR_TEMP
+    _attr_supported_features = LightEntityFeature.TRANSITION
     _attr_min_color_temp_kelvin = 2000
     _attr_max_color_temp_kelvin = 6500
 

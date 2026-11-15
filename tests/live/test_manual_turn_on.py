@@ -145,3 +145,77 @@ async def test_device_adjustment_after_our_command_is_still_an_override(hass, fr
     lamp.device_report(brightness=30)
     await step(hass, freezer)
     assert overridden(entry) == [LIGHT]
+
+
+async def adapt_then_report(hass, freezer, user, lamp, *, explicit_brightness, report_brightness):
+    """Turn on, let the integration adapt with a 5 s transition, then have the
+    light report again once the transition is over.
+
+    The service call returns at once; the report arrives about 5.6 s later, as
+    lights that suppress reports during a transition do.
+    """
+    data = {"entity_id": LIGHT}
+    if explicit_brightness:
+        data["brightness_pct"] = 20
+    await hass.services.async_call(
+        "light", "turn_on", data, context=Context(user_id=user.id), blocking=True
+    )
+    for _ in range(56):
+        await step(hass, freezer)
+    assert len(lamp.commands) == 2, lamp.commands
+    assert lamp.commands[1]["transition"] == 5
+    target = lamp.commands[1]["brightness"]
+    lamp.device_report(brightness=report_brightness)
+    await step(hass, freezer)
+    lamp.device_report(brightness=target)
+    await step(hass, freezer)
+    return target
+
+
+@pytest.mark.parametrize("explicit_brightness", [True, False])
+async def test_report_at_the_end_of_the_turn_on_transition_is_not_an_override(
+    hass, freezer, hass_admin_user, room, explicit_brightness
+):
+    """Seen on real hardware: "manual override detected" 5.9 s after turn-on."""
+    lamp, entry = await room("instant", transition=5)
+    # The light reports the level of the user's own turn-on before settling.
+    target = await adapt_then_report(
+        hass, freezer, hass_admin_user, lamp, explicit_brightness=explicit_brightness, report_brightness=51
+    )
+
+    assert hass.states.get(LIGHT).attributes["brightness"] == target
+    assert overridden(entry) == []
+    assert hass.states.get("sensor.room_lamp_adaptation").state == "adapting"
+
+
+async def test_user_adjustment_during_the_turn_on_transition_is_an_override(hass, freezer, hass_admin_user, room):
+    lamp, entry = await room("instant", transition=5)
+    await hass.services.async_call(
+        "light", "turn_on", {"entity_id": LIGHT}, context=Context(user_id=hass_admin_user.id), blocking=True
+    )
+    for _ in range(20):
+        await step(hass, freezer)
+    assert len(lamp.commands) == 2
+
+    await hass.services.async_call(
+        "light", "turn_on", {"entity_id": LIGHT, "brightness_pct": 40},
+        context=Context(user_id=hass_admin_user.id), blocking=True,
+    )
+    await step(hass, freezer)
+    assert overridden(entry) == [LIGHT]
+    assert hass.states.get(LIGHT).attributes["brightness"] == 102
+
+
+async def test_device_adjustment_after_the_turn_on_transition_is_an_override(hass, freezer, hass_admin_user, room):
+    """Once the turn-on has settled, a change at the device is judged as before."""
+    lamp, entry = await room("instant", transition=5)
+    await adapt_then_report(
+        hass, freezer, hass_admin_user, lamp, explicit_brightness=False, report_brightness=51
+    )
+    assert overridden(entry) == []
+
+    for _ in range(30):  # past the expected-change window
+        await step(hass, freezer)
+    lamp.device_report(brightness=30)
+    await step(hass, freezer)
+    assert overridden(entry) == [LIGHT]

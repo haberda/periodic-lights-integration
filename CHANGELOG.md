@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+
+- A light turned on with a specific brightness could still end up adapted but marked as
+  manually overridden, about one transition time after it turned on. Lights that hold
+  back status reports during a transition can report the level of the original turn-on
+  when the transition ends, and that report was taken for a manual adjustment. Reports
+  from the light itself are no longer judged while a turn-on settles (the transition
+  time plus two seconds). Changes a user makes from Home Assistant in that time are
+  still overrides.
+
+### Added
+
+- A `PL OVERRIDE DETECTED` debug log line for each detected override, with the values
+  before and after and what the integration expected.
+
 ## 0.5.1
 
 Version numbers in this file now match the release tags. `manifest.json` had fallen

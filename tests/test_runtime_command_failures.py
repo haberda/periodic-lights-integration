@@ -109,6 +109,12 @@ class CommandFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(kelvin_steps)
         self.assertIn('light.ok', [eid for p in kelvin_steps for eid in p['entity_id']])
 
+    async def test_failed_turn_on_command_settles_on_retry(self):
+        self.data['pl_turn_on_pending'] = {'light.dead'}
+        with self.assertLogs(self.control._LOGGER, 'WARNING'):
+            await self.update()
+        self.assertEqual(self.data['pl_turn_on_pending'], {'light.dead'})
+
     async def test_cancellation_still_propagates(self):
         self.hass.services.async_call.side_effect = asyncio.CancelledError()
         with self.assertRaises(asyncio.CancelledError):

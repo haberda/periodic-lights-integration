@@ -144,6 +144,49 @@ class OverrideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, [True])
         self.assertIs(self.data['pl_expected_changes']['light.test']['in_flight'], False)
 
+    async def test_report_while_turn_on_settles_is_not_judged(self):
+        self.expected['settling'] = True
+        self.change(self.state(50), self.state(30))
+        self.assertFalse(self.data['overridden_lights'])
+
+    async def test_user_adjustment_while_turn_on_settles_is_detected(self):
+        self.expected['settling'] = True
+        self.change(self.state(50), self.state(30, user='user'))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_report_after_the_settling_window_is_judged(self):
+        self.expected.update(settling=True, until=99)
+        self.change(self.state(50), self.state(30))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_only_the_turn_on_command_settles(self):
+        self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
+        self.hass.services = SimpleNamespace(async_call=AsyncMock())
+        update = self.runtime.control.async_update_lights_for_entry
+        self.integration.async_call_later = lambda hass, delay, fn: (lambda: None)
+        self.data['debounce_delay'] = 0
+        self.data['pl_expected_changes'].clear()
+
+        # Turning on marks the light; the command that follows consumes the mark.
+        self.integration.async_update_lights_for_entry = AsyncMock()
+        self.hass.async_create_task = lambda coro: coro.close()
+        self.change(SimpleNamespace(state='off', attributes={}), self.state(50))
+        self.assertEqual(self.data['pl_turn_on_pending'], {'light.test'})
+        await update(self.hass, 'entry', force=True)
+        self.assertIs(self.data['pl_expected_changes']['light.test']['settling'], True)
+        self.assertFalse(self.data['pl_turn_on_pending'])
+
+        # A later command, outside that window, is an ordinary one.
+        self.data['pl_expected_changes']['light.test']['until'] = 0
+        await update(self.hass, 'entry', force=True)
+        self.assertIs(self.data['pl_expected_changes']['light.test']['settling'], False)
+
+    async def test_turning_off_drops_a_pending_turn_on(self):
+        self.integration.async_call_later = lambda hass, delay, fn: (lambda: None)
+        self.change(SimpleNamespace(state='off', attributes={}), self.state(50))
+        self.change(self.state(50), SimpleNamespace(state='off', attributes={}, context=None))
+        self.assertFalse(self.data['pl_turn_on_pending'])
+
     async def test_repeated_updates_do_not_remove_override_listener(self):
         self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
         self.hass.services = SimpleNamespace(async_call=AsyncMock())

@@ -181,6 +181,17 @@ counted as a manual override.
 - Some lights report "on" first and their brightness in a second update. For those,
   the requested level arrives as an adjustment to a light that is already on, so it is
   kept and the light shows as manually overridden.
+- While the light settles (the transition time plus two seconds after it is adapted),
+  status reports from the light itself are not treated as manual adjustments. Lights
+  often report the level of the original turn-on when the transition ends. A change
+  made from Home Assistant by a user during that time is still a manual override. A
+  change made on the device itself during that time is not noticed, and the next
+  update may replace it.
+
+If a light is marked as manually overridden and you don't know why, enable debug
+logging for `custom_components.periodic_lights`. Each detection logs a
+`PL OVERRIDE DETECTED` line with the brightness and color temperature before and
+after, whether the change carried a user, and what the integration expected.
 
 ## Boost
 
