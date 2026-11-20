@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class SplitUpdateTests(unittest.IsolatedAsyncioTestCase):
@@ -17,7 +17,7 @@ class SplitUpdateTests(unittest.IsolatedAsyncioTestCase):
         async def call(domain, service, payload, **kwargs):
             self.calls.append((service, payload))
         self.hass = SimpleNamespace(
-            data={'periodic_lights': {'entry': self.data}},
+            config_entries=FakeConfigEntries({'entry': self.data}),
             states=SimpleNamespace(get=lambda eid: self.state),
             services=SimpleNamespace(async_call=call),
         )
@@ -38,7 +38,7 @@ class SplitUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.calls), 1)
 
     async def test_reloaded_entry_skips_old_color_step(self):
-        await self.update_during(lambda: self.hass.data['periodic_lights'].update(entry=dict(self.data)))
+        await self.update_during(lambda: self.hass.config_entries.set_runtime('entry', dict(self.data)))
         self.assertEqual(len(self.calls), 1)
 
     async def test_color_control_disabled_during_transition(self):
@@ -82,12 +82,13 @@ class OverrideTests(unittest.IsolatedAsyncioTestCase):
             add_update_listener=lambda fn: lambda: None,
         )
         self.hass = SimpleNamespace(
-            data={}, is_running=True,
+            state='running',
             states=SimpleNamespace(get=lambda eid: self.state(50)),
-            config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock()),
+            config_entries=FakeConfigEntries(async_forward_entry_setups=AsyncMock()),
         )
+        self.hass.config_entries.add(self.entry)
         await self.integration.async_setup_entry(self.hass, self.entry)
-        self.data = self.hass.data['periodic_lights']['entry']
+        self.data = self.hass.config_entries.async_get_entry('entry').runtime_data
         self.data['pl_override_detection_ready'] = True
         self.expected = {
             'until': 200, 'brightness_pct': 100, 'start_brightness_pct': 20,
@@ -120,6 +121,71 @@ class OverrideTests(unittest.IsolatedAsyncioTestCase):
         self.expected['until'] = 99
         self.change(self.state(50), self.state(60))
         self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_report_while_command_is_in_flight_is_not_judged(self):
+        self.expected['in_flight'] = True
+        self.change(self.state(50), self.state(30))
+        self.assertFalse(self.data['overridden_lights'])
+
+    async def test_user_adjustment_while_command_is_in_flight_is_detected(self):
+        self.expected['in_flight'] = True
+        self.change(self.state(50), self.state(30, user='user'))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_in_flight_flag_is_cleared_when_the_command_returns(self):
+        self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
+        seen = []
+
+        async def call(domain, service, payload, **kwargs):
+            seen.append(self.data['pl_expected_changes']['light.test']['in_flight'])
+
+        self.hass.services = SimpleNamespace(async_call=call)
+        await self.runtime.control.async_update_lights_for_entry(self.hass, 'entry', force=True)
+        self.assertEqual(seen, [True])
+        self.assertIs(self.data['pl_expected_changes']['light.test']['in_flight'], False)
+
+    async def test_report_while_turn_on_settles_is_not_judged(self):
+        self.expected['settling'] = True
+        self.change(self.state(50), self.state(30))
+        self.assertFalse(self.data['overridden_lights'])
+
+    async def test_user_adjustment_while_turn_on_settles_is_detected(self):
+        self.expected['settling'] = True
+        self.change(self.state(50), self.state(30, user='user'))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_report_after_the_settling_window_is_judged(self):
+        self.expected.update(settling=True, until=99)
+        self.change(self.state(50), self.state(30))
+        self.assertIn('light.test', self.data['overridden_lights'])
+
+    async def test_only_the_turn_on_command_settles(self):
+        self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
+        self.hass.services = SimpleNamespace(async_call=AsyncMock())
+        update = self.runtime.control.async_update_lights_for_entry
+        self.integration.async_call_later = lambda hass, delay, fn: (lambda: None)
+        self.data['debounce_delay'] = 0
+        self.data['pl_expected_changes'].clear()
+
+        # Turning on marks the light; the command that follows consumes the mark.
+        self.integration.async_update_lights_for_entry = AsyncMock()
+        self.hass.async_create_task = lambda coro: coro.close()
+        self.change(SimpleNamespace(state='off', attributes={}), self.state(50))
+        self.assertEqual(self.data['pl_turn_on_pending'], {'light.test'})
+        await update(self.hass, 'entry', force=True)
+        self.assertIs(self.data['pl_expected_changes']['light.test']['settling'], True)
+        self.assertFalse(self.data['pl_turn_on_pending'])
+
+        # A later command, outside that window, is an ordinary one.
+        self.data['pl_expected_changes']['light.test']['until'] = 0
+        await update(self.hass, 'entry', force=True)
+        self.assertIs(self.data['pl_expected_changes']['light.test']['settling'], False)
+
+    async def test_turning_off_drops_a_pending_turn_on(self):
+        self.integration.async_call_later = lambda hass, delay, fn: (lambda: None)
+        self.change(SimpleNamespace(state='off', attributes={}), self.state(50))
+        self.change(self.state(50), SimpleNamespace(state='off', attributes={}, context=None))
+        self.assertFalse(self.data['pl_turn_on_pending'])
 
     async def test_repeated_updates_do_not_remove_override_listener(self):
         self.runtime.control._compute_phase_with_optional_override = lambda *args: 0.5
@@ -165,7 +231,13 @@ class SchedulingTests(unittest.IsolatedAsyncioTestCase):
         self.hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
         await self.integration.async_unload_entry(self.hass, self.entry)
         cancel.assert_called_once_with()
-        self.assertNotIn('periodic_lights', self.hass.data)
+
+    async def test_update_after_unload_sends_nothing(self):
+        # Home Assistant drops runtime_data once the unload succeeds.
+        self.hass.config_entries.unload('entry')
+        self.hass.services = SimpleNamespace(async_call=AsyncMock())
+        await self.runtime.control.async_update_lights_for_entry(self.hass, 'entry', force=True)
+        self.hass.services.async_call.assert_not_awaited()
 
 
 class AreaSelectionTests(unittest.IsolatedAsyncioTestCase):

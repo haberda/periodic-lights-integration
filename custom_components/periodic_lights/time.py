@@ -4,7 +4,6 @@ from datetime import time as dt_time
 
 from homeassistant.components.time import TimeEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -13,10 +12,11 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
     CONF_NAME,
-    MANUFACTURER,
     ATTR_FIXED_MIN_TIME,
     DEFAULT_FIXED_MIN_TIME,
 )
+from .runtime import get_entry_data
+from .entity import PeriodicLightsEntity
 
 
 from .temperature_entities import TemperatureCurveTime
@@ -29,7 +29,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the fixed minimum time entity for a config entry."""
     async_add_entities([
-        TemperatureCurveTime(hass, entry.entry_id, entry.title, 'temperature_fixed_min_time', 'Temperature Fixed Minimum Time'),
+        TemperatureCurveTime(hass, entry.entry_id, entry.title, 'temperature_fixed_min_time', 'Temperature fixed minimum time'),
     ])
     name = entry.data.get(CONF_NAME, entry.title)
     async_add_entities(
@@ -43,8 +43,11 @@ async def async_setup_entry(
     )
 
 
-class PeriodicLightsFixedMinTimeEntity(RestoreEntity, TimeEntity):
+class PeriodicLightsFixedMinTimeEntity(PeriodicLightsEntity, RestoreEntity, TimeEntity):
     """Time-only entity for selecting the daily minimum brightness time."""
+
+    # The device carries the setup name; entity names must not repeat it.
+    _attr_has_entity_name = True
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         self.hass = hass
@@ -54,17 +57,9 @@ class PeriodicLightsFixedMinTimeEntity(RestoreEntity, TimeEntity):
         # Internal storage as datetime.time
         self._time: dt_time | None = None
 
-        self._attr_name = f"{setup_name} Fixed Minimum Time"
+        self._attr_name = "Fixed minimum time"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_fixed_min_time"
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     @property
     def native_value(self) -> dt_time | None:
@@ -91,8 +86,8 @@ class PeriodicLightsFixedMinTimeEntity(RestoreEntity, TimeEntity):
                 # Fallback to midnight if default is somehow invalid
                 self._time = dt_time(0, 0, 0)
 
-        # 3) Store into hass.data as "HH:MM:SS" for the rest of the integration
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        # 3) Store into runtime data as "HH:MM:SS" for the rest of the integration
+        entry_data = get_entry_data(self.hass, self._entry_id)
         if entry_data is not None and self._time is not None:
             entry_data[ATTR_FIXED_MIN_TIME] = self._time.strftime("%H:%M:%S")
 
@@ -103,7 +98,7 @@ class PeriodicLightsFixedMinTimeEntity(RestoreEntity, TimeEntity):
         """Set a new time (Home Assistant passes a datetime.time here)."""
         self._time = value
 
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        entry_data = get_entry_data(self.hass, self._entry_id)
         if entry_data is not None and self._time is not None:
             # Store as string "HH:MM:SS" so sensor/light_control can parse it
             entry_data[ATTR_FIXED_MIN_TIME] = self._time.strftime("%H:%M:%S")

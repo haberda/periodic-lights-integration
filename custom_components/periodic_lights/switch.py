@@ -7,7 +7,6 @@ from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
@@ -20,7 +19,6 @@ from .const import (
     DOMAIN,
     CONF_LIGHTS,
     CONF_NAME,
-    MANUFACTURER,
     ATTR_ENABLED,
     ATTR_BRIGHTNESS_ENABLED,
     ATTR_COLOR_TEMP_ENABLED,
@@ -30,6 +28,8 @@ from .const import (
     ATTR_USE_FIXED_MIN_TIME,
     SIGNAL_REFRESH_ENTITIES,
 )
+from .runtime import get_entry_data
+from .entity import PeriodicLightsEntity
 from .boost import boost_active, boost_end
 from .boost_control import async_start_boost, async_stop_boost
 from .light_control import async_update_lights_for_entry, cancel_pending_light_updates
@@ -44,7 +44,7 @@ async def async_setup_entry(
 ) -> None:
     async_add_entities([
         TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'separate_temperature_curve', 'Use separate temperature curve'),
-        TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'temperature_use_fixed_min_time', 'Temperature Use Fixed Minimum Time'),
+        TemperatureCurveSwitch(hass, entry.entry_id, entry.title, 'temperature_use_fixed_min_time', 'Temperature use fixed minimum time'),
     ])
     data = entry.data
     name = data.get(CONF_NAME, entry.title)
@@ -61,22 +61,12 @@ async def async_setup_entry(
         PeriodicLightsBoostSwitch(hass, entry.entry_id, name),
     ]
 
-    @callback
-    def _refresh_entities() -> None:
-        for ent in entities:
-            ent.async_write_ha_state()
-
-    unsub = async_dispatcher_connect(
-        hass,
-        f"{SIGNAL_REFRESH_ENTITIES}_{entry.entry_id}",
-        _refresh_entities,
-    )
-    entry.async_on_unload(unsub)
-
     async_add_entities(entities)
 
 
-class _BasePeriodicSwitch(RestoreEntity, SwitchEntity):
+class _BasePeriodicSwitch(PeriodicLightsEntity, RestoreEntity, SwitchEntity):
+    # The device carries the setup name; entity names must not repeat it.
+    _attr_has_entity_name = True
     _attr_device_class = SwitchDeviceClass.SWITCH
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
@@ -85,14 +75,20 @@ class _BasePeriodicSwitch(RestoreEntity, SwitchEntity):
         self._setup_name = setup_name
         self._is_on: bool | None = None
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
+    async def async_added_to_hass(self) -> None:
+        """Refresh this switch's state and attributes when the setup changes."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_REFRESH_ENTITIES}_{self._entry_id}",
+                self._handle_refresh,
+            )
         )
+
+    @callback
+    def _handle_refresh(self) -> None:
+        self.async_write_ha_state()
 
     @property
     def is_on(self) -> bool:
@@ -103,7 +99,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str, lights: list[str]) -> None:
         super().__init__(hass, entry_id, setup_name)
         self._lights = lights
-        self._attr_name = f"{setup_name} Enabled"
+        self._attr_name = "Enabled"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_enabled"
 
     def _name_for(self, entity_id: str) -> str:
@@ -137,7 +133,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        state = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        state = get_entry_data(self.hass, self._entry_id)
 
         if state is not None:
             lights: list[str] = state.get(CONF_LIGHTS, []) or []
@@ -166,7 +162,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
         old_state = await self.async_get_last_state()
         self._is_on = old_state.state == "on" if old_state is not None else True
 
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_ENABLED] = self._is_on
 
@@ -174,7 +170,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_ENABLED] = True
 
@@ -206,7 +202,7 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_ENABLED] = False
             cancel_pending_light_updates(data)
@@ -226,20 +222,20 @@ class PeriodicLightsMasterSwitch(_BasePeriodicSwitch):
 class PeriodicLightsBrightnessSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Brightness Updates"
+        self._attr_name = "Brightness updates"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_brightness_enabled"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         old_state = await self.async_get_last_state()
         self._is_on = old_state.state == "on" if old_state is not None else True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_BRIGHTNESS_ENABLED] = self._is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_BRIGHTNESS_ENABLED] = True
         self.async_write_ha_state()
@@ -248,7 +244,7 @@ class PeriodicLightsBrightnessSwitch(_BasePeriodicSwitch):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_BRIGHTNESS_ENABLED] = False
         self.async_write_ha_state()
@@ -258,20 +254,20 @@ class PeriodicLightsBrightnessSwitch(_BasePeriodicSwitch):
 class PeriodicLightsColorTempSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Color Temp Updates"
+        self._attr_name = "Color temp updates"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_color_temp_enabled"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         old_state = await self.async_get_last_state()
         self._is_on = old_state.state == "on" if old_state is not None else True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_COLOR_TEMP_ENABLED] = self._is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_COLOR_TEMP_ENABLED] = True
         self.async_write_ha_state()
@@ -280,7 +276,7 @@ class PeriodicLightsColorTempSwitch(_BasePeriodicSwitch):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_COLOR_TEMP_ENABLED] = False
         self.async_write_ha_state()
@@ -297,7 +293,7 @@ class PeriodicLightsSplitServiceCallsSwitch(_BasePeriodicSwitch):
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Split brightness/color updates"
+        self._attr_name = "Split brightness/color updates"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_split_service_calls"
 
     async def async_added_to_hass(self) -> None:
@@ -305,13 +301,13 @@ class PeriodicLightsSplitServiceCallsSwitch(_BasePeriodicSwitch):
         old_state = await self.async_get_last_state()
         # Default OFF
         self._is_on = old_state.state == "on" if old_state is not None else False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_SPLIT_SERVICE_CALLS] = self._is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_SPLIT_SERVICE_CALLS] = True
         self.async_write_ha_state()
@@ -320,7 +316,7 @@ class PeriodicLightsSplitServiceCallsSwitch(_BasePeriodicSwitch):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_SPLIT_SERVICE_CALLS] = False
         self.async_write_ha_state()
@@ -330,20 +326,20 @@ class PeriodicLightsSplitServiceCallsSwitch(_BasePeriodicSwitch):
 class PeriodicLightsBedtimeSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Bedtime"
+        self._attr_name = "Bedtime"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_bedtime"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         old_state = await self.async_get_last_state()
         self._is_on = old_state.state == "on" if old_state is not None else False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_BEDTIME] = self._is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_BEDTIME] = True
         self.async_write_ha_state()
@@ -352,7 +348,7 @@ class PeriodicLightsBedtimeSwitch(_BasePeriodicSwitch):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_BEDTIME] = False
         self.async_write_ha_state()
@@ -365,12 +361,12 @@ class PeriodicLightsBoostSwitch(_BasePeriodicSwitch):
 
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Boost"
+        self._attr_name = "Boost"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_boost"
         self._attr_icon = "mdi:rocket-launch-outline"
 
     def _data(self) -> dict[str, Any]:
-        return self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        return self.entry_data
 
     @property
     def is_on(self) -> bool:
@@ -406,20 +402,20 @@ class PeriodicLightsBoostSwitch(_BasePeriodicSwitch):
 class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Transition when light turns on"
+        self._attr_name = "Transition when light turns on"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_transition_on_turn_on"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         old_state = await self.async_get_last_state()
         self._is_on = old_state.state == "on" if old_state is not None else True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_TRANSITION_ON_TURN_ON] = self._is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_TRANSITION_ON_TURN_ON] = True
         self.async_write_ha_state()
@@ -428,7 +424,7 @@ class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_TRANSITION_ON_TURN_ON] = False
         self.async_write_ha_state()
@@ -438,20 +434,20 @@ class PeriodicLightsTransitionOnTurnOnSwitch(_BasePeriodicSwitch):
 class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
     def __init__(self, hass: HomeAssistant, entry_id: str, setup_name: str) -> None:
         super().__init__(hass, entry_id, setup_name)
-        self._attr_name = f"{setup_name} Use Fixed Minimum Time"
+        self._attr_name = "Use fixed minimum time"
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_use_fixed_min_time"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         old_state = await self.async_get_last_state()
         self._is_on = old_state.state == "on" if old_state is not None else False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_USE_FIXED_MIN_TIME] = self._is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self._is_on = True
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_USE_FIXED_MIN_TIME] = True
         self.async_write_ha_state()
@@ -460,7 +456,7 @@ class PeriodicLightsFixedMinSwitch(_BasePeriodicSwitch):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self._is_on = False
-        data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        data = get_entry_data(self.hass, self._entry_id)
         if data is not None:
             data[ATTR_USE_FIXED_MIN_TIME] = False
         self.async_write_ha_state()

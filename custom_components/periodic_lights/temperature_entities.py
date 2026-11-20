@@ -12,10 +12,10 @@ from homeassistant.helpers.dispatcher import (
     async_dispatcher_connect,
     async_dispatcher_send,
 )
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN, MANUFACTURER, SIGNAL_REFRESH_ENTITIES
+from .const import DOMAIN, SIGNAL_REFRESH_ENTITIES
+from .entity import PeriodicLightsEntity
 from .light_control import async_update_lights_for_entry
 from .temperature_curve import (
     DEFAULTS,
@@ -33,7 +33,7 @@ OPTIONS = {
 }
 
 
-class _TemperatureEntity(RestoreEntity):
+class _TemperatureEntity(PeriodicLightsEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
@@ -47,7 +47,7 @@ class _TemperatureEntity(RestoreEntity):
 
     @property
     def _data(self):
-        return self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        return self.entry_data
 
     @property
     def _value(self):
@@ -56,14 +56,6 @@ class _TemperatureEntity(RestoreEntity):
         shared = next(key for key, value in KEYS.items() if value == self._key)
         return self._data.get(self._key, self._data.get(shared, DEFAULTS[shared]))
 
-    @property
-    def device_info(self):
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry_id)},
-            name=self._setup_name,
-            manufacturer=MANUFACTURER,
-            model="Light Setup",
-        )
 
     @property
     def extra_state_attributes(self):

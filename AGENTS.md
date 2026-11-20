@@ -28,6 +28,9 @@ All integration code lives in `custom_components/periodic_lights/`:
 - `sensor.py`: desired-value and per-light adaptation diagnostics.
 - `image.py`, `preview.py`: native image entity and cached PNG curve rendering.
 - `switch.py`, `number.py`, `select.py`, `time.py`, `button.py`: user controls.
+- `runtime.py`: accessors for each setup's state, stored in `entry.runtime_data`.
+  Do not put state in `hass.data`.
+- `entity.py`: `PeriodicLightsEntity`, the base for every platform's entities.
 - `const.py`: shared keys, defaults, platform list, and dispatcher signals.
 - `strings.json`, `translations/en.json`: UI strings and state translations.
 - `manifest.json`: integration metadata and runtime dependencies.
@@ -43,6 +46,10 @@ brand images are in `custom_components/periodic_lights/brand/`.
   listeners, and pending updates when an entry unloads.
 - Respect manual overrides. Distinguish expected transition reports from external
   adjustments without disabling detection throughout repeated transitions.
+- A light is adapted as it turns on, even if the turn-on asked for a level. Reports
+  without a user context are not judged while our own service call is in flight, or
+  during the window of the one command that follows a turn-on. Do not widen that to
+  other commands; reports with a user context are always overrides.
 - Keep the brightness and temperature curves independent when separation is on;
   retain linked behavior by default. Preserve bedtime and per-light range handling.
 - Keep live targets, diagnostics, and previews consistent through shared calculation
@@ -80,6 +87,11 @@ python -m unittest discover -s tests -p 'test_runtime*.py'
 ruff check --select E9,F821,F822,F823 custom_components tests
 git diff --check
 ```
+
+For changes to the config or options flow, setup, unload, or entity registration,
+also run `pytest` (the `tests/live/` suite). It needs
+`pytest-homeassistant-custom-component` in a virtual environment and runs inside a
+real Home Assistant instance. Keep `config_flow.py` at full coverage there.
 
 `tests/runtime_support.py` loads production modules against a minimal mocked Home
 Assistant boundary. Extend the mocks when new API boundaries are needed. Preview

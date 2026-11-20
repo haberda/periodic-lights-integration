@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class DeduplicationTests(unittest.IsolatedAsyncioTestCase):
@@ -11,7 +11,7 @@ class DeduplicationTests(unittest.IsolatedAsyncioTestCase):
         self.control._compute_phase_with_optional_override = lambda *args: 0.5
         self.data = {"lights": ["light.one"], "transition": 0}
         self.hass = SimpleNamespace(
-            data={"periodic_lights": {"entry": self.data}},
+            config_entries=FakeConfigEntries({"entry": self.data}),
             states=SimpleNamespace(
                 get=lambda eid: SimpleNamespace(state="on", attributes={})
             ),

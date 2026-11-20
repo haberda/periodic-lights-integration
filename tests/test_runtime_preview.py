@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 from PIL import Image
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class PreviewTests(unittest.IsolatedAsyncioTestCase):
@@ -65,7 +65,7 @@ class PreviewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_image_cache_invalidates_on_settings_change(self):
         hass = SimpleNamespace(
-            data={"periodic_lights": {"entry": {}}},
+            config_entries=FakeConfigEntries({"entry": {}}),
             async_add_executor_job=AsyncMock(return_value=b"png"),
         )
         image = self.runtime.package.image.PeriodicLightsCurveImage(
@@ -101,7 +101,7 @@ class PreviewTests(unittest.IsolatedAsyncioTestCase):
             "temperature_shaping_param": 2,
         }
         hass = SimpleNamespace(
-            data={"periodic_lights": {"entry": data}},
+            config_entries=FakeConfigEntries({"entry": data}),
             states=SimpleNamespace(
                 get=lambda eid: SimpleNamespace(state="on", name="Desk", attributes={})
             ),

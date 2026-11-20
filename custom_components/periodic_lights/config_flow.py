@@ -144,20 +144,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if not combined_lights:
                 errors["base"] = "no_lights"
-            elif min_brightness < 0 or max_brightness > 100:
-                errors["base"] = "brightness_out_of_range"
+            # The number selectors below enforce each field's range, so only
+            # the relationships between fields need checking here.
             elif min_brightness > max_brightness:
                 errors["base"] = "min_brightness_greater_than_max"
-            elif min_kelvin < 1500 or max_kelvin > 6500:
-                errors["base"] = "kelvin_out_of_range"
             elif min_kelvin > max_kelvin:
                 errors["base"] = "min_kelvin_greater_than_max"
-            elif update_interval < 10 or update_interval > 3600:
-                errors["base"] = "interval_out_of_range"
-            elif transition < 0 or transition > 600:
-                errors["base"] = "transition_out_of_range"
-            elif debounce_delay < 0 or debounce_delay > 5:
-                errors["base"] = "debounce_out_of_range"
             else:
                 await self.async_set_unique_id(name)
                 self._abort_if_unique_id_configured()

@@ -13,6 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ATTR_TURN_ON_PENDING,
     ATTR_FAILED_LIGHTS,
     ATTR_OVERRIDDEN_LIGHTS,
     ATTR_EXPECTED_CHANGES,
@@ -45,6 +46,7 @@ from .const import (
     SIGNAL_UPDATE_SENSORS,
     SIGNAL_REFRESH_ENTITIES,
 )
+from .runtime import all_entry_data, get_entry_data
 from .boost import effective_settings
 from .curve_math import apply_shaping, map_pct_to_range
 from .solar_curve import daily_pct
@@ -149,6 +151,12 @@ def _record_expected_change(
         previous = expected_map.get(lid, {})
         if previous.get("until", 0) < now_ts:
             previous = {}
+        # The first command after a light turns on settles the turn-on. A split
+        # update's second step continues the same settling period.
+        pending = entry_data.get(ATTR_TURN_ON_PENDING)
+        settling = bool(previous.get("settling")) or bool(pending and lid in pending)
+        if pending:
+            pending.discard(lid)
         expected_map[lid] = {
             "start_brightness_pct": round(brightness / 255 * 100) if brightness is not None else None,
             "start_kelvin": round(kelvin_now) if kelvin_now is not None else None,
@@ -156,12 +164,18 @@ def _record_expected_change(
             "brightness_pct": brightness_pct if brightness_pct is not None else previous.get("brightness_pct"),
             "color_temp_kelvin": kelvin if kelvin is not None else previous.get("color_temp_kelvin"),
             "expects_color_change": False,
+            # True until the service call for this command returns.
+            "in_flight": True,
+            # True for the command that adapts a light as it turns on. Until
+            # "until", reports without a user context are not judged: they
+            # describe the turn-on itself, which this command replaces.
+            "settling": settling,
         }
 
 
 def layered_group_owner(hass: HomeAssistant, data: dict[str, Any], light_id: str) -> str | None:
     """A selected virtual group owns its members, including across PL entries."""
-    entries = [data, *hass.data.get(DOMAIN, {}).values()]
+    entries = [data, *all_entry_data(hass)]
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -225,7 +239,7 @@ async def async_update_lights_for_entry(
     hass: HomeAssistant, entry_id: str, *, force: bool = False,
 ) -> None:
     """Track in-flight updates so disabling or unloading can cancel them."""
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    entry_data = get_entry_data(hass, entry_id)
     if entry_data is None:
         return
     tasks = entry_data.setdefault(ATTR_UPDATE_TASKS, set())
@@ -252,13 +266,7 @@ async def _async_update_lights_for_entry(
     force: bool = False,
 ) -> None:
     """Apply current settings to all configured lights for this entry."""
-    domain_data = hass.data.get(DOMAIN)
-    if not domain_data:
-        if force:
-            async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
-        return
-
-    entry_data: dict[str, Any] | None = domain_data.get(entry_id)
+    entry_data: dict[str, Any] | None = get_entry_data(hass, entry_id)
     if not entry_data:
         if force:
             async_dispatcher_send(hass, f"{SIGNAL_UPDATE_SENSORS}_{entry_id}")
@@ -319,7 +327,7 @@ async def _async_update_lights_for_entry(
 
     async def _call_light(service: str, entity_ids: list[str], data: dict[str, Any]) -> None:
         # State may change while a split update waits for its first transition.
-        current = hass.data.get(DOMAIN, {}).get(entry_id)
+        current = get_entry_data(hass, entry_id)
         if current is not entry_data or not current.get(ATTR_ENABLED, True):
             return
         if "color_temp_kelvin" in data and not current.get(ATTR_COLOR_TEMP_ENABLED, True):
@@ -349,6 +357,9 @@ async def _async_update_lights_for_entry(
             for lid in eligible:
                 if entry_data.get(ATTR_EXPECTED_CHANGES, {}).get(lid) is expected[lid]:
                     entry_data[ATTR_EXPECTED_CHANGES].pop(lid, None)
+                    if expected[lid].get("settling"):
+                        # The retry is still this light's turn-on command.
+                        entry_data.setdefault(ATTR_TURN_ON_PENDING, set()).add(lid)
                 entry_data.get(ATTR_LAST_APPLIED, {}).pop(lid, None)
             if not isinstance(err, (HomeAssistantError, vol.Invalid)):
                 raise
@@ -363,11 +374,14 @@ async def _async_update_lights_for_entry(
                 entry_id, service, eligible, err,
             )
             return
+        finally:
+            for record in expected.values():
+                record["in_flight"] = False
         entry_data.get(ATTR_FAILED_LIGHTS, set()).difference_update(eligible)
         for lid in eligible:
             # Off/on, disable, or override clearing during the call invalidates this session.
             if (service == "turn_on"
-                and hass.data.get(DOMAIN, {}).get(entry_id) is entry_data
+                and get_entry_data(hass, entry_id) is entry_data
                 and entry_data.get(ATTR_EXPECTED_CHANGES, {}).get(lid) is expected[lid]
                 and light_adaptation_status(hass, entry_data, lid) == "adapting"):
                 last = entry_data.setdefault(ATTR_LAST_APPLIED, {}).setdefault(lid, {})

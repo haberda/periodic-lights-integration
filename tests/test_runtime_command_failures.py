@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from runtime_support import load_runtime
+from runtime_support import FakeConfigEntries, load_runtime
 
 
 class CommandFailureTests(unittest.IsolatedAsyncioTestCase):
@@ -29,7 +29,7 @@ class CommandFailureTests(unittest.IsolatedAsyncioTestCase):
                 raise self.dead_error
 
         self.hass = SimpleNamespace(
-            data={'periodic_lights': {'entry': self.data}},
+            config_entries=FakeConfigEntries({'entry': self.data}),
             states=SimpleNamespace(get=lambda eid: SimpleNamespace(state='on', attributes={})),
             services=SimpleNamespace(async_call=AsyncMock(side_effect=call)),
         )
@@ -108,6 +108,12 @@ class CommandFailureTests(unittest.IsolatedAsyncioTestCase):
         kelvin_steps = [p for p in self.calls if 'color_temp_kelvin' in p]
         self.assertTrue(kelvin_steps)
         self.assertIn('light.ok', [eid for p in kelvin_steps for eid in p['entity_id']])
+
+    async def test_failed_turn_on_command_settles_on_retry(self):
+        self.data['pl_turn_on_pending'] = {'light.dead'}
+        with self.assertLogs(self.control._LOGGER, 'WARNING'):
+            await self.update()
+        self.assertEqual(self.data['pl_turn_on_pending'], {'light.dead'})
 
     async def test_cancellation_still_propagates(self):
         self.hass.services.async_call.side_effect = asyncio.CancelledError()

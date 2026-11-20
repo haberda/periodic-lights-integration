@@ -16,9 +16,9 @@ from .const import (
     ATTR_BOOST_DURATION,
     ATTR_BOOST_UNTIL,
     DEFAULT_BOOST_DURATION,
-    DOMAIN,
     SIGNAL_REFRESH_ENTITIES,
 )
+from .runtime import get_entry_data
 from .light_control import async_update_lights_for_entry
 
 
@@ -42,7 +42,7 @@ def async_start_boost(
     Without ``until``, the end time comes from the configured duration (0 = no end).
     ``resume`` restores a boost after a restart and skips the end-time calculation.
     """
-    data = hass.data.get(DOMAIN, {}).get(entry_id)
+    data = get_entry_data(hass, entry_id)
     if data is None:
         return
     _cancel_timer(data)
@@ -70,7 +70,7 @@ def async_start_boost(
 @callback
 def async_stop_boost(hass: HomeAssistant, entry_id: str) -> None:
     """Turn boost off and return to the normal shape."""
-    data = hass.data.get(DOMAIN, {}).get(entry_id)
+    data = get_entry_data(hass, entry_id)
     if data is None:
         return
     _cancel_timer(data)

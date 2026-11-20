@@ -8,11 +8,11 @@ from typing import Any
 
 from homeassistant.components import logbook
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
 
 from .const import (
@@ -50,6 +50,7 @@ from .const import (
     SIGNAL_REFRESH_ENTITIES,  # <-- IMPORTANT: use the same signal as switch/button
     ATTR_LIGHT_ON_LISTENER,
     ATTR_OVERRIDDEN_LIGHTS,
+    ATTR_TURN_ON_PENDING,
     ATTR_EXPECTED_CHANGES,
     ATTR_LAST_APPLIED,
     ATTR_CONTROLLED_LIGHTS,
@@ -65,6 +66,7 @@ from .const import (
     DEFAULT_BOOST_SHAPING_PARAM,
     DEFAULT_BOOST_DURATION,
 )
+from .runtime import get_entry_data
 from .boost_control import cancel_boost_timer
 from .light_selection import (
     SelectionRules,
@@ -158,6 +160,15 @@ def _matches_expected(
     if getattr(context, "user_id", None) is not None:
         return False
 
+    # A report that lands while our own command is still executing describes the
+    # light before that command took effect, for example the tail of the action
+    # that turned the light on. The command supersedes it, so it is not judged.
+    # The same holds for the whole window of the command that adapts a light as
+    # it turns on: lights that hold back reports during a transition can report
+    # the turn-on's own level when the transition ends.
+    if expected.get("in_flight", False) or expected.get("settling", False):
+        return True
+
     checks = (
         (brightness_enabled, "brightness_pct", "start_brightness_pct", _get_brightness_pct_from_state, 2),
         (color_temp_enabled, "color_temp_kelvin", "start_kelvin", _get_kelvin_from_state, 75),
@@ -218,8 +229,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pformat(dict(entry.options)),
     )
 
-    hass.data.setdefault(DOMAIN, {})
-
     setup_name = entry.data.get("name", entry.title)
 
     def _notify_entry_state_changed() -> None:
@@ -265,30 +274,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ATTR_LIGHT_ON_LISTENER: None,
     }
 
-    hass.data[DOMAIN][entry.entry_id] = entry_state
+    entry.runtime_data = entry_state
 
     # ---- Enable override detection after HA startup + grace ----
     @callback
     def _enable_override_detection(_now=None) -> None:
-        st = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        st = get_entry_data(hass, entry.entry_id)
         if not st:
             return
         st[ATTR_OVERRIDE_DETECTION_READY] = True
         _LOGGER.debug("PL OVERRIDE DETECTION READY | entry_id=%s", entry.entry_id)
 
-    def _schedule_override_detection_enable() -> None:
+    @callback
+    def _on_started_for_override(_hass: HomeAssistant) -> None:
         entry.async_on_unload(async_call_later(hass, 15, _enable_override_detection))
 
-    if hass.is_running:
-        _schedule_override_detection_enable()
-    else:
-        @callback
-        def _on_started_for_override(_event) -> None:
-            _schedule_override_detection_enable()
-
-        entry.async_on_unload(
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started_for_override)
-        )
+    # async_at_started runs the callback now if Home Assistant has started, and
+    # its unsubscribe is safe to call after the one-time listener has fired.
+    entry.async_on_unload(async_at_started(hass, _on_started_for_override))
 
     # ---- Reload entry when options change ----
     async def _update_listener(_hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
@@ -313,6 +316,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         last = state.get(ATTR_LAST_APPLIED, {})
         last.pop(light_id, None)
+
+        state.get(ATTR_TURN_ON_PENDING, set()).discard(light_id)
 
         if before:
             _notify_entry_state_changed()
@@ -397,7 +402,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not entity_id:
             return
 
-        state = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        state = (get_entry_data(hass, entry.entry_id) or {})
         lights: list[str] = state.get(CONF_LIGHTS, []) or []
         if entity_id not in lights:
             return
@@ -439,6 +444,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _mark_control_for_light_once(state, entity_id)
 
             if state.get(ATTR_TRANSITION_ON_TURN_ON, True):
+                state.setdefault(ATTR_TURN_ON_PENDING, set()).add(entity_id)
                 _schedule_turn_on_update(state)
 
             return
@@ -458,6 +464,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             brightness_enabled=brightness_enabled, color_temp_enabled=color_temp_enabled,
         ):
             return
+        context = getattr(new_state, "context", None)
+        _LOGGER.debug(
+            "PL OVERRIDE DETECTED | entry_id=%s light=%s brightness_pct=%s->%s kelvin=%s->%s "
+            "context_user=%s context_parent=%s expected=%s",
+            entry.entry_id, entity_id,
+            _get_brightness_pct_from_state(old_state), _get_brightness_pct_from_state(new_state),
+            _get_kelvin_from_state(old_state), _get_kelvin_from_state(new_state),
+            getattr(context, "user_id", None), getattr(context, "parent_id", None), expected or None,
+        )
         _mark_overridden(state, entity_id)
 
     # One listener remains active throughout updates and transitions.
@@ -498,7 +513,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # ---- Post-start refresh: area may be incomplete during early startup ----
     def _apply_effective_lights(new_lights: list[str]) -> None:
-        st = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        st = get_entry_data(hass, entry.entry_id)
         if not st:
             return
 
@@ -534,16 +549,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Periodic Lights POSTSTART REFRESH failed | entry_id=%s", entry.entry_id)
 
-    if hass.is_running:
-        entry.async_on_unload(async_call_later(hass, 5, _do_poststart_refresh))
-        entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
-    else:
-        @callback
-        def _on_started(_event) -> None:
-            hass.async_create_task(_do_poststart_refresh())
-            entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
+    loaded_during_startup = hass.state is not CoreState.running
 
-        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started))
+    @callback
+    def _on_started(_hass: HomeAssistant) -> None:
+        if loaded_during_startup:
+            hass.async_create_task(_do_poststart_refresh())
+        else:
+            entry.async_on_unload(async_call_later(hass, 5, _do_poststart_refresh))
+        entry.async_on_unload(async_call_later(hass, 60, _do_poststart_refresh))
+
+    entry.async_on_unload(async_at_started(hass, _on_started))
 
     # ---- Keep area and label membership current when registries change ----
     if selection_rules.selects_anything:
@@ -596,7 +612,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    entry_state = hass.data[DOMAIN].get(entry.entry_id)
+    entry_state = get_entry_data(hass, entry.entry_id)
     if entry_state:
         cancel_pending_light_updates(entry_state)
         cancel_boost_timer(entry_state)
@@ -607,9 +623,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             unsub()
             entry_state[ATTR_LIGHT_ON_LISTENER] = None
         
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-        if not hass.data[DOMAIN]:
-            hass.data.pop(DOMAIN, None)
-    return unload_ok
+    # Home Assistant clears entry.runtime_data once the unload succeeds.
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

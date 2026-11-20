@@ -26,6 +26,14 @@ YAML or file editing required for setup.
 After setup, open the integration’s device page to adjust its controls.
 See the [configuration reference](docs.md#configuration) for individual options.
 
+## Removal
+
+1. Open **Settings → Devices & Services → Periodic Lights**.
+2. For each setup, open the three-dot menu and choose **Delete**. This removes the
+   setup's device and all of its entities. Your lights keep their current state.
+3. To uninstall completely, delete `config/custom_components/periodic_lights/` (or
+   remove the repository in HACS) and restart Home Assistant.
+
 ## How it works
 
 A daily curve maps the time of day to your configured brightness and color
@@ -52,17 +60,3 @@ For detailed controls, diagnostics, and update behavior, see the
 ## AI use
 
 AI was used to translate the previous AppDaemon app to a custom component. AI was also used to extend the component to include several new features.
-## Layered Lights
-
-Select a [Layered Lights](https://github.com/haberda/layered_lights) group as a
-light to adapt. Periodic Lights supplies the daily brightness, Kelvin target, and
-transition; Layered Lights distributes brightness through category and individual
-curves. It retains the usual behavior of adapting only groups that are on.
-
-If an area selection includes both a group and its physical members, member
-commands are suppressed while the group is selected, including across Periodic
-Lights entries. Their status is `controlled_by_group`. During a Layered Lights
-editor preview the group reports `group_preview`; adaptation resumes after
-restoration. Manual adjustments to the group still use normal override detection.
-Configure manual overrides at group level; physical-member adjustments are not
-independent Periodic Lights overrides when their group owns control.

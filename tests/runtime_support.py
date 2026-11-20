@@ -6,6 +6,45 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
+class FakeConfigEntries:
+    """Stand-in for hass.config_entries holding entries and their runtime_data."""
+
+    def __init__(self, runtime=None, **attrs):
+        self._entries = {}
+        for entry_id, data in (runtime or {}).items():
+            self.set_runtime(entry_id, data)
+        self.__dict__.update(attrs)
+
+    def add(self, entry):
+        if not hasattr(entry, 'domain'):
+            entry.domain = 'periodic_lights'
+        self._entries[entry.entry_id] = entry
+        return entry
+
+    def set_runtime(self, entry_id, data):
+        """Assign runtime_data, as a (re)load of the entry would."""
+        entry = self._entries.setdefault(
+            entry_id, SimpleNamespace(entry_id=entry_id, domain='periodic_lights')
+        )
+        entry.runtime_data = data
+
+    def unload(self, entry_id):
+        """Drop runtime_data, as Home Assistant does after a successful unload."""
+        entry = self._entries.get(entry_id)
+        if entry is not None and hasattr(entry, 'runtime_data'):
+            del entry.runtime_data
+
+    def async_get_entry(self, entry_id):
+        return self._entries.get(entry_id)
+
+    def async_entries(self, domain=None):
+        """Return entries for one domain, as Home Assistant does."""
+        return [
+            entry for entry in self._entries.values()
+            if domain is None or entry.domain == domain
+        ]
+
+
 ROOT = Path(__file__).resolve().parents[1] / 'custom_components' / 'periodic_lights'
 
 
@@ -40,12 +79,26 @@ def load_runtime():
     module('homeassistant.components.sensor', SensorEntity=Entity, SensorDeviceClass=SimpleNamespace(ENUM='enum'))
     module('homeassistant.components.switch', SwitchEntity=Entity, SwitchDeviceClass=SimpleNamespace(SWITCH='switch'))
     module('homeassistant.components.select', SelectEntity=Entity)
+    module('homeassistant.components.button', ButtonEntity=Entity)
     module('homeassistant.components.time', TimeEntity=Entity)
     module('homeassistant.components.number', NumberEntity=Entity, NumberMode=SimpleNamespace(BOX='box'))
-    module('homeassistant.helpers.entity', DeviceInfo=dict, EntityCategory=SimpleNamespace(DIAGNOSTIC='diagnostic'))
+    module('homeassistant.helpers.entity', Entity=Entity, DeviceInfo=dict, EntityCategory=SimpleNamespace(DIAGNOSTIC='diagnostic'))
     module('homeassistant.helpers.entity_platform', AddEntitiesCallback=object)
     module('homeassistant.helpers.restore_state', RestoreEntity=RestoreEntity)
-    module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object, callback=lambda fn: fn)
+    core_state = SimpleNamespace(running='running', starting='starting')
+    module('homeassistant.core', Context=lambda: SimpleNamespace(user_id=None), HomeAssistant=object,
+           callback=lambda fn: fn, CoreState=core_state, Event=object)
+
+    def async_at_started(hass, at_start_cb):
+        """Run now when started; otherwise park the callback for the test to fire."""
+        if getattr(hass, 'state', core_state.running) == core_state.running:
+            at_start_cb(hass)
+            return lambda: None
+        pending = hass.__dict__.setdefault('at_started', [])
+        pending.append(at_start_cb)
+        return lambda: pending.remove(at_start_cb) if at_start_cb in pending else None
+
+    module('homeassistant.helpers.start', async_at_started=async_at_started)
     class ConfigFlow:
         def __init_subclass__(cls, **kwargs):
             pass
@@ -66,7 +119,7 @@ def load_runtime():
            parse_datetime=lambda value: datetime.fromisoformat(value))
     package = module('review_periodic_lights', __path__=[str(ROOT)])
     with patch.dict(sys.modules, modules):
-        for name in ('const', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'boost', 'light_control', 'boost_control', 'temperature_entities', 'number', 'light_selection', 'config_flow', 'sensor', 'switch', 'select', 'time', 'preview', 'image'):
+        for name in ('const', 'runtime', 'entity', 'curve_math', 'solar_curve', 'temperature_curve', 'curve_model', 'boost', 'light_control', 'boost_control', 'temperature_entities', 'number', 'light_selection', 'config_flow', 'sensor', 'switch', 'select', 'time', 'button', 'preview', 'image'):
             spec = importlib.util.spec_from_file_location(f'{package.__name__}.{name}', ROOT / f'{name}.py')
             loaded = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = loaded

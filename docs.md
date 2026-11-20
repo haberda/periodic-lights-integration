@@ -60,6 +60,12 @@ examples use a `lamps` label on every lamp in the house.
 
 When setup completes, you get multiple controls grouped under one device:
 
+Entities are named after their function, and Home Assistant adds the setup name in
+front, for example `switch.dining_room_boost`. Versions before 0.5.1 could create IDs
+with the setup name repeated. Existing IDs are never changed automatically; to
+rename them, open the setup's device page, choose the three-dot menu, and select
+**Recreate entity IDs**, then update dashboards and automations that use the old IDs.
+
 #### Switches
 
 | Entity | Function |
@@ -69,7 +75,7 @@ When setup completes, you get multiple controls grouped under one device:
 | **Color Temperature Updates** | Toggles CT control. |
 | **Bedtime** | When on, forces all lights to minimum brightness & CT. |
 | **Boost** | Temporarily follows the boost shape. See [Boost](#boost). |
-| **Transition When Light Turns On** | If enabled, newly turned-on lights immediately transition to current curve values. |
+| **Transition When Light Turns On** | If enabled, newly turned-on lights immediately transition to current curve values. This applies even when the turn-on asked for a specific brightness or color temperature; see [Turning a light on at a chosen level](#turning-a-light-on-at-a-chosen-level). |
 | **Use Fixed Minimum Time** | If enabled, uses the time set in the Fixed Minimum Time entity to set a fixed minimum point. Using this feature disables solar based curve calculation so the light parameters will not vary with the season. |
 
 #### Number inputs
@@ -160,6 +166,32 @@ Shaping parameter 1.5:
 Shaping parameter 2:
 
 <img src='assets/images/curves_param_2.png' width=800>
+
+## Turning a light on at a chosen level
+
+With **Transition When Light Turns On** enabled, a light is moved to the curve as soon
+as it turns on. A turn-on that asks for a level, such as 20% from a dashboard or an
+automation, is treated the same way: the light comes on and is then adapted. It is not
+counted as a manual override.
+
+- To keep the level you asked for, turn **Transition When Light Turns On** off, or
+  adjust the light after it is on. An adjustment to a light that is already on is a
+  manual override, and the light keeps it until it is turned off or you use **Clear
+  overrides and update**.
+- Some lights report "on" first and their brightness in a second update. For those,
+  the requested level arrives as an adjustment to a light that is already on, so it is
+  kept and the light shows as manually overridden.
+- While the light settles (the transition time plus two seconds after it is adapted),
+  status reports from the light itself are not treated as manual adjustments. Lights
+  often report the level of the original turn-on when the transition ends. A change
+  made from Home Assistant by a user during that time is still a manual override. A
+  change made on the device itself during that time is not noticed, and the next
+  update may replace it.
+
+If a light is marked as manually overridden and you don't know why, enable debug
+logging for `custom_components.periodic_lights`. Each detection logs a
+`PL OVERRIDE DETECTED` line with the brightness and color temperature before and
+after, whether the change carried a user, and what the integration expected.
 
 ## Boost
 
@@ -259,10 +291,34 @@ Run the runtime unit tests:
 python -m unittest discover -s tests -p "test_runtime*.py"
 ```
 
-These tests mock the Home Assistant boundary. Use a live Home Assistant installation
-to verify behavior before deployment.
+These tests mock the Home Assistant boundary, so they are fast and need only Pillow.
 
-The `Validate` GitHub workflow runs hassfest, HACS validation, these tests, and the
+A second suite in `tests/live/` runs inside a real Home Assistant instance. It covers
+the config and options flows in full, setup, entity IDs, reload, and unload:
+
+```bash
+pip install "pytest-homeassistant-custom-component==0.13.375"
+pytest
+```
+
+Install it in a virtual environment; it pulls in a full Home Assistant release.
+Neither suite replaces a check on your own installation before deployment.
+
+Each release of that package pins exactly one Home Assistant release. CI runs the
+suite twice, with pinned versions set in `.github/workflows/validate.yml`:
+
+| Package version | Home Assistant | Why |
+|---|---|---|
+| 0.13.354 | 2026.8.0 | The oldest release `hacs.json` allows. |
+| 0.13.375 | 2026.10.4 | The newest release the package supports. |
+
+To move to a newer Home Assistant, find the package release that pins it (each
+release's requirements on PyPI name the version), update the second row here and
+in the workflow, and run `pytest` locally. If you raise the minimum version in
+`hacs.json`, update the first row to match. Releases newer than the second row are
+not covered by CI until the package publishes a matching version.
+
+The `Validate` GitHub workflow runs hassfest, HACS validation, both test suites, and the
 ruff error checks on every push and pull request to `main`, and weekly so that a new
 Home Assistant release that breaks the manifest shows up without a code change.
 

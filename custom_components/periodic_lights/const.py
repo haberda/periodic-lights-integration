@@ -27,7 +27,7 @@ SIGNAL_UPDATE_SENSORS = "periodic_lights_update_sensors"
 # Dispatcher signal used to refresh entities (switch attributes, etc.)
 SIGNAL_REFRESH_ENTITIES = "periodic_lights_refresh_entities"
 
-# Runtime flags stored in hass.data for each entry
+# Runtime flags stored in each entry's runtime_data
 ATTR_ENABLED = "enabled"
 ATTR_BRIGHTNESS_ENABLED = "brightness_enabled"
 ATTR_COLOR_TEMP_ENABLED = "color_temp_enabled"
@@ -47,6 +47,7 @@ ATTR_LAST_COMMAND_SENT = "pl_last_command_sent"  # dict[light_id, dict[str, Any]
 ATTR_CONTROLLED_LIGHTS = "pl_controlled_lights"  # set[str], logbook gating
 ATTR_OVERRIDE_DETECTION_READY = "pl_override_detection_ready"  # bool
 ATTR_UPDATE_TASKS = "pl_update_tasks"  # set[asyncio.Task]
+ATTR_TURN_ON_PENDING = "pl_turn_on_pending"  # set[str], lights awaiting their turn-on command
 ATTR_FAILED_LIGHTS = "pl_failed_lights"  # set[str], lights whose last command failed
 ATTR_RESCHEDULE_LIGHT_UPDATES = "pl_reschedule_light_updates"  # callback
 ATTR_STOP_LIGHT_UPDATES = "pl_stop_light_updates"  # callback
